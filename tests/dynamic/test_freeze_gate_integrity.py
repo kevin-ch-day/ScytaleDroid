@@ -67,3 +67,11 @@ def test_research_gate_rejects_unsafe_duplicate_and_nonstring_run_ids(
     assert "freeze_manifest:duplicate_run_id:../outside" in result.errors
     assert "freeze_manifest:invalid_run_id" in result.errors
     assert result.checked_runs == 0
+
+
+def test_static_link_sql_uses_hash_equality() -> None:
+    source = Path(freeze_gate.__file__).read_text(encoding="utf-8")
+    assert "LOWER(static_handoff_hash)" not in source
+    assert "static_handoff_hash = %s" in source
+    assert "base_apk_sha256 = %s" in source
+    assert "artifact_set_hash = %s" in source

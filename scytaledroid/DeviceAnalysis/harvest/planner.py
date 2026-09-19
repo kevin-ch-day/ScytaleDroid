@@ -86,10 +86,11 @@ def _build_package_plan(
 
     # A singleton APK is the base even when the on-device filename is not
     # ``base.apk`` (system/priv-app packages). Split installs keep name-based
-    # classification so ``base.apk`` remains the only non-split member.
-    force_base = len(readable_paths) == 1
+    # classification so ``base.apk`` remains the only non-split member when
+    # present; otherwise the first readable path is the base.
+    base_path = _base_source_path(readable_paths)
     artifacts = [
-        _build_artifact_plan(row, source_path, force_base=force_base)
+        _build_artifact_plan(row, source_path, force_base=(source_path == base_path))
         for source_path in readable_paths
     ]
 
@@ -108,6 +109,13 @@ def _build_package_plan(
         policy_filtered_reason=policy_reason,
         skip_reason=skip_reason,
     )
+
+
+def _base_source_path(readable_paths: list[str]) -> str | None:
+    for path in readable_paths:
+        if Path(path).name.lower() == "base.apk":
+            return path
+    return readable_paths[0] if readable_paths else None
 
 
 def _build_artifact_plan(

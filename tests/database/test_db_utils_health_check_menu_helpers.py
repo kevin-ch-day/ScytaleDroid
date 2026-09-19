@@ -38,8 +38,6 @@ def test_render_scoring_checks_handles_no_snapshots_and_optional_tables():
             return 0
         if "SELECT MAX(snapshot_id)" in sql:
             return None
-        if "SELECT COUNT(*) FROM contributors" in sql:
-            return 0
         if "SELECT COUNT(*) FROM risk_scores" in sql:
             return 0
         if "SELECT COUNT(*) FROM static_permission_risk_vnext" in sql:
@@ -55,6 +53,8 @@ def test_render_scoring_checks_handles_no_snapshots_and_optional_tables():
 
     assert ("warn", "permission audit", "no snapshots recorded yet") in calls
     assert ("warn", "grade distribution", "no snapshots available") in calls
+    assert any(label == "matrix Permission Intel flags" for _level, label, _detail in calls)
+    assert any(label == "vnext rationale mix" for _level, label, _detail in calls)
     assert any(
         label == "risk_scores"
         and level == "info"

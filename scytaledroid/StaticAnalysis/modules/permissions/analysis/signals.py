@@ -49,11 +49,20 @@ def compute_group_strengths(
     for name, _tag in declared:
         is_framework = name.startswith("android.")
         short = name.split(".")[-1].upper()
-        prot = (protection_map.get(short) or "").lower()
-        is_ds = prot in {"dangerous", "signature"}
+        prot = str(protection_map.get(short) or protection_map.get(name) or "").lower()
+        tokens = {
+            part.strip()
+            for part in prot.replace("|", " ").replace(",", " ").split()
+            if part.strip()
+        }
+        is_ds = bool(tokens & {"dangerous", "signature"})
         if is_framework and is_ds:
             fw_ds.add(short)
 
+        lowered_name = str(name).lower()
+        if "android.permission.health." in lowered_name:
+            _bump("SENS", True)
+            fw_ds.add("HEALTH_CONNECT_DATA")
         for key, strong in iter_group_hits(short, is_ds=is_ds):
             _bump(key, strong)
         # Ads/Attribution (vendor is handled by caller)
@@ -71,7 +80,9 @@ def iter_group_hits(short: str, *, is_ds: bool) -> Iterable[tuple[str, bool]]:
     # Camera / Mic
     if s == "CAMERA":
         yield "CAM", True
-    if s in {"RECORD_AUDIO", "CAPTURE_AUDIO_OUTPUT"}:
+    if s == "BACKGROUND_CAMERA":
+        yield "CAM", True
+    if s in {"RECORD_AUDIO", "CAPTURE_AUDIO_OUTPUT", "RECORD_BACKGROUND_AUDIO"}:
         yield "MIC", True
     # Contacts/Accounts
     if s in {"READ_CONTACTS", "WRITE_CONTACTS", "GET_ACCOUNTS", "MANAGE_ACCOUNTS"}:
@@ -88,8 +99,8 @@ def iter_group_hits(short: str, *, is_ds: bool) -> Iterable[tuple[str, bool]]:
     if "READ_MEDIA_" in s or s in {"READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE"}:
         yield "STR", is_ds or s == "MANAGE_EXTERNAL_STORAGE"
     # Sensors/Activity
-    if s in {"BODY_SENSORS", "BODY_SENSORS_BACKGROUND", "HEALTH_CONNECT"}:
-        yield "SENS", is_ds
+    if s in {"BODY_SENSORS", "BODY_SENSORS_BACKGROUND", "HEALTH_CONNECT", "READ_HEALTH_DATA_IN_BACKGROUND"}:
+        yield "SENS", is_ds or s in {"BODY_SENSORS_BACKGROUND", "READ_HEALTH_DATA_IN_BACKGROUND"}
     if s in {"ACTIVITY_RECOGNITION"}:
         yield "ACT", is_ds
     # Bluetooth/Nearby

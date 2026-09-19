@@ -8,6 +8,7 @@ from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.StaticAnalysis.modules.permissions.analysis.curves import saturating_response
 from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
     _classify_permissions as _perm_classify,
 )
@@ -21,6 +22,7 @@ from scytaledroid.StaticAnalysis.modules.permissions.permission_protection_looku
     _fetch_protections as _perm_fetch_protections,
 )
 from scytaledroid.StaticAnalysis.risk.permission import (
+    collect_catalog_score_signals,
     permission_points_0_20,
     permission_risk_grade,
     permission_risk_score_detail,
@@ -159,6 +161,7 @@ def _build_permission_profile(report, app_result) -> dict[str, object | None]:
     flagged_normals = len(flagged_normals_set)
     noteworthy_normals = len(noteworthy_normals_set)
     special_risk_normals = len(special_risk_normals_set)
+    catalog_signals = collect_catalog_score_signals(profiles_section)
 
     allow_backup = bool(allow_backup_flag) if allow_backup_flag is not None else False
     legacy_storage = bool(legacy_storage_flag) if legacy_storage_flag is not None else False
@@ -180,6 +183,9 @@ def _build_permission_profile(report, app_result) -> dict[str, object | None]:
             noteworthy_normals=noteworthy_normals,
             special_risk_normals=special_risk_normals,
             weak_guards=weak_guard_count,
+            background_sensitive=catalog_signals["background_sensitive"],
+            health_sensitive=catalog_signals["health_sensitive"],
+            privileged_declared=catalog_signals["privileged_declared"],
         )
     except Exception:
         detail = {
@@ -332,7 +338,9 @@ def _build_static_risk_row(
 
     validated = len(aggregates.get("api_keys_high") or [])
     entropy_hits = int(counts_section.get("high_entropy", 0) or 0) if isinstance(counts_section, Mapping) else 0
-    secrets_points = float(min(20, validated * 2)) + (3.0 if entropy_hits >= 10 else (1.5 if entropy_hits else 0.0))
+    secrets_points = float(saturating_response(validated, 2.0, 20.0)) + (
+        3.0 if entropy_hits >= 10 else (1.5 if entropy_hits else 0.0)
+    )
     webssl_points = 0.0
     corr_points = 0.0
     if has_code_http and "android.permission.INTERNET" in declared:

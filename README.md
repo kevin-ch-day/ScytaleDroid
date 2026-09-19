@@ -311,8 +311,9 @@ Environment variables control CLI behaviour:
   compatibility mode and reads permission reference data from the main DB.
 - `SCYTALEDROID_PERMISSION_INTEL_V1_SHADOW_MODE` – defaults to `LEGACY_ONLY`.
   Set `COMPARE_ONLY` only for explicit diagnostics that call
-  `load_permission_catalog_shadow()`; the returned candidate catalog never
-  replaces normal static classification.
+  `load_permission_catalog_shadow()`. Normal static classification already
+  prefers the deployed Permission Intel v1 catalog when the Intel DSN is
+  reachable, then falls back to `config/framework_permissions.yaml`.
 
 Example TOML:
 

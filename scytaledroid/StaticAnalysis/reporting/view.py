@@ -326,18 +326,35 @@ def _collect_permission_rows(report: StaticAnalysisReport) -> list[Mapping[str, 
     return entries
 
 
+_PI_SOURCE_LABELS = {
+    "permission_intel_v1": "AOSP",
+    "permission_intel_aosp_dict": "AOSP",
+    "permission_intel_oem_dict": "OEM",
+    "dict_aosp": "AOSP",
+    "catalog": "AOSP",
+}
+_AUTHORITY_LABELS = {
+    "AOSP_PUBLIC": "AOSP",
+    "AOSP_HIDDEN": "AOSP-Hidden",
+    "AOSP_MODULE": "AOSP-Module",
+    "AOSP_INTERNAL": "AOSP-Internal",
+}
+
+
 def _classify_permission(
     name: str,
     profile: Mapping[str, Any] | None,
 ) -> tuple[str, str | None]:
     if not isinstance(name, str):
         return "Unknown", None
+    if isinstance(profile, Mapping):
+        authority = str(profile.get("authority_class") or "").strip().upper()
+        if authority in _AUTHORITY_LABELS:
+            return _AUTHORITY_LABELS[authority], None
+        source = str(profile.get("catalog_source") or "").strip()
+        if source in _PI_SOURCE_LABELS:
+            return _PI_SOURCE_LABELS[source], None
     if name.startswith("android.permission."):
-        source = None
-        if isinstance(profile, Mapping):
-            source = profile.get("catalog_source")
-        if source in {"dict_aosp", "catalog"}:
-            return "AOSP", None
         reason = _ghost_reason(name)
         return "AOSP-Legacy", reason
     if isinstance(profile, Mapping) and profile.get("is_custom"):
@@ -465,6 +482,11 @@ def _serialise_permission_profile(profile: Mapping[str, Any] | None) -> Mapping[
         "flagged_normal_class": profile.get("flagged_normal_class"),
         "is_scored_flagged_normal": _profile_flag(profile, "is_scored_flagged_normal"),
         "severity": profile.get("severity") if isinstance(profile.get("severity"), (int, float)) else 0,
+        "catalog_source": profile.get("catalog_source"),
+        "authority_class": profile.get("authority_class"),
+        "background_permission": profile.get("background_permission"),
+        "feature_dependency": profile.get("feature_dependency"),
+        "guard_strength": profile.get("guard_strength"),
     }
 
 

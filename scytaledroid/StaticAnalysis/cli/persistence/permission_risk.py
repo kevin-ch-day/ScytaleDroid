@@ -17,6 +17,10 @@ from scytaledroid.Database.db_func.static_analysis import (
     static_permission_risk as permission_risk_db,
 )
 from scytaledroid.Database.db_utils.package_utils import normalize_package_name
+from scytaledroid.StaticAnalysis.modules.permissions.analysis.name_patterns import (
+    is_background_sensitive_name,
+    is_health_permission_name,
+)
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .utils import canonical_decimal_text, first_text, require_canonical_schema
@@ -51,7 +55,11 @@ def _ensure_permission_vnext_table() -> bool:
     return _PERMISSION_TABLE_VNEXT_READY
 
 
-def _risk_class_and_reason(profile: Mapping[str, object]) -> tuple[str | None, str | None]:
+def _risk_class_and_reason(
+    profile: Mapping[str, object],
+    *,
+    permission_name: str = "",
+) -> tuple[str | None, str | None]:
     guard_strength = str(profile.get("guard_strength") or "").strip().lower()
     runtime_dangerous = bool(profile.get("is_runtime_dangerous"))
     flagged_normal = bool(profile.get("is_flagged_normal"))
@@ -60,8 +68,22 @@ def _risk_class_and_reason(profile: Mapping[str, object]) -> tuple[str | None, s
         return "HIGH", "RUNTIME_DANGEROUS_WEAK_GUARD"
     if runtime_dangerous:
         return "MEDIUM", "RUNTIME_DANGEROUS"
+    try:
+        severity = int(profile.get("severity") or 0)
+    except (TypeError, ValueError):
+        severity = 0
+    if severity >= 80:
+        return "HIGH", "HIGH_SEVERITY_PERMISSION"
     if flagged_class == "special_risk_normal":
         return "MEDIUM", "SPECIAL_RISK_NORMAL_PERMISSION"
+    name = str(profile.get("name") or permission_name or "").lower()
+    group = str(profile.get("group") or "").strip()
+    if group.lower().startswith("android.permission-group."):
+        group = group.rsplit(".", 1)[-1]
+    if profile.get("background_permission") or is_background_sensitive_name(name):
+        return "MEDIUM", "BACKGROUND_SENSITIVE_PERMISSION"
+    if group.upper() == "HEALTH" or is_health_permission_name(name):
+        return "MEDIUM", "HEALTH_DATA_PERMISSION"
     if flagged_class == "noteworthy_normal":
         return "LOW", "NOTEWORTHY_NORMAL_PERMISSION"
     if flagged_normal:
@@ -87,6 +109,7 @@ def _persist_permission_risk_vnext(
     warnings: list[dict[str, str]] = []
     seen_permission_names: set[str] = set()
     duplicate_examples: dict[str, list[str]] = defaultdict(list)
+    payloads: list[dict[str, object]] = []
     for permission_name, profile in permission_profiles.items():
         perm = str(permission_name or "").strip()
         if not perm:
@@ -96,8 +119,8 @@ def _persist_permission_risk_vnext(
             duplicate_examples[canonical_perm].append(perm)
             continue
         seen_permission_names.add(canonical_perm)
-        risk_class, rationale_code = _risk_class_and_reason(profile)
-        permission_risk_db.upsert_vnext(
+        risk_class, rationale_code = _risk_class_and_reason(profile, permission_name=perm)
+        payloads.append(
             {
                 "run_id": int(run_id),
                 "permission_name": canonical_perm,
@@ -106,6 +129,10 @@ def _persist_permission_risk_vnext(
                 "rationale_code": rationale_code,
             }
         )
+    if len(payloads) == 1:
+        permission_risk_db.upsert_vnext(payloads[0])
+    elif payloads:
+        permission_risk_db.upsert_vnext_many(payloads)
     for canonical_perm in sorted(duplicate_examples):
         examples = duplicate_examples[canonical_perm]
         sample = examples[:5]

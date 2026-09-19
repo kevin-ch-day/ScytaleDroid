@@ -31,6 +31,14 @@ GOVERNANCE_ROWS_TABLE = "permission_governance_snapshot_rows"
 SIGNAL_CATALOG_TABLE = "permission_signal_catalog"
 SIGNAL_MAPPINGS_TABLE = "permission_signal_mappings"
 COHORT_EXPECTATIONS_TABLE = "permission_cohort_expectations"
+V1_CATALOG_RELEASE_VIEW = "android_permission_v1_catalog_release"
+V1_CURRENT_PERMISSION_VIEW = "android_permission_v1_current_permission"
+V1_SCYTALEDROID_PERMISSION_VIEW = "android_permission_v1_scytaledroid_permission"
+AUTHORITY_FACT_TABLE = "android_permission_authority_fact"
+NON_PERMISSION_FACT_TABLE = "android_permission_non_permission_fact"
+TOKEN_ANOMALY_FACT_TABLE = "android_permission_token_anomaly_fact"
+CONCEPT_TABLE = "android_permission_concept"
+DECLARATION_CONFLICT_TABLE = "api_permission_declaration_conflict"
 
 _REFERENCE_TABLES: tuple[str, ...] = (
     AOSP_DICT_TABLE,
@@ -52,11 +60,28 @@ _SIGNAL_TABLES: tuple[str, ...] = (
     COHORT_EXPECTATIONS_TABLE,
 )
 
+# Freeze/copy inventory for dictionary + governance + signals. Do not add
+# deployed v1 views or fact tables here — freeze renames MANAGED_TABLES.
 MANAGED_TABLES: tuple[str, ...] = _REFERENCE_TABLES + _GOVERNANCE_TABLES + _SIGNAL_TABLES
+
+# Read surfaces used by current interpretation and the analysis catalog.
+# Tracked by preflight; not freeze/copy targets.
+INTERPRETATION_SURFACES: tuple[str, ...] = (
+    V1_CATALOG_RELEASE_VIEW,
+    V1_CURRENT_PERMISSION_VIEW,
+    V1_SCYTALEDROID_PERMISSION_VIEW,
+    AUTHORITY_FACT_TABLE,
+    NON_PERMISSION_FACT_TABLE,
+    TOKEN_ANOMALY_FACT_TABLE,
+    CONCEPT_TABLE,
+    DECLARATION_CONFLICT_TABLE,
+)
 
 SUPPORTED_V1_SCHEMA_CONTRACT = "org.android-permission-intel.schema-v1-draft"
 SUPPORTED_V1_SCHEMA_VERSION = "1.0.0-draft"
 SUPPORTED_V1_SCHEMA_RELEASE_STATUS = "DRAFT"
+SUPPORTED_V1_INTERPRETATION_CONTRACTS = frozenset({"1.0.0-draft", "1.1.0-draft"})
+V1_REFERENCE_MODE = "DEPLOYED_V1"
 _SCHEMA_VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?$")
 _TRIAGE_STATUSES = frozenset(
     {
@@ -274,16 +299,25 @@ def governance_snapshot_count() -> int:
     return int(row[0] or 0) if row else 0
 
 
+_INTEL_TABLES_PRESENT: set[str] = set()
+
+
 def intel_table_exists(table: str) -> bool:
+    name = str(table or "")
+    if name in _INTEL_TABLES_PRESENT:
+        return True
     row = run_sql(
         "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-        (table,),
+        (name,),
         fetch="one",
         query_name="permission_intel.intel_table_exists",
-        context={"table": table},
+        context={"table": name},
         read_only=True,
     )
-    return bool(row and int(row[0] or 0) > 0)
+    present = bool(row and int(row[0] or 0) > 0)
+    if present:
+        _INTEL_TABLES_PRESENT.add(name)
+    return present
 
 
 def probe_dictionary_read_access() -> bool:
@@ -299,6 +333,30 @@ def probe_dictionary_read_access() -> bool:
         return bool(row and row[0] is not None)
     except Exception:
         return False
+
+
+# COALESCE(lifecycle_status, '') wraps the column and prevents the family/lifecycle
+# index from being used as a range predicate. NULL is a live dict row.
+_AOSP_ACTIVE_LIFECYCLE_SQL = "(lifecycle_status IS NULL OR lifecycle_status <> 'invalid_token')"
+
+
+def fetch_oem_permission_catalog_rows() -> list[tuple[object, ...]]:
+    """Return OEM dictionary rows that carry a non-empty protection level."""
+
+    rows = run_sql(
+        """
+        SELECT o.permission_string, o.protection_level
+        FROM android_permission_dict_oem o
+        INNER JOIN android_permission_meta_oem_vendor v
+          ON v.vendor_id = o.vendor_id
+        WHERE o.protection_level IS NOT NULL
+          AND TRIM(o.protection_level) <> ''
+        """,
+        fetch="all",
+        query_name="permission_intel.fetch_oem_permission_catalog_rows",
+        read_only=True,
+    )
+    return list(rows or [])
 
 
 def fetch_database_definers() -> list[tuple[object, ...]]:
@@ -324,13 +382,19 @@ def fetch_database_definers() -> list[tuple[object, ...]]:
 
 
 def fetch_aosp_permission_catalog_rows() -> list[tuple[object, object, object, object]]:
-    """Return raw AOSP permission catalog rows from the permission-intel source."""
+    """Return AOSP dict rows that can overlay the analysis catalog.
+
+    Empty protection_level rows are excluded in SQL so the overlay does not
+    ship the full dictionary for Python to discard.
+    """
 
     rows = run_sql(
-        """
+        f"""
         SELECT constant_value, protection_level, added_in_api_level, deprecated_in_api_level
         FROM android_permission_dict_aosp
-        WHERE COALESCE(lifecycle_status, '') <> 'invalid_token'
+        WHERE {_AOSP_ACTIVE_LIFECYCLE_SQL}
+          AND protection_level IS NOT NULL
+          AND TRIM(protection_level) <> ''
         """,
         fetch="all",
         query_name="permission_intel.fetch_aosp_permission_catalog_rows",
@@ -394,8 +458,49 @@ def fetch_v1_catalog_gate() -> dict[str, Any]:
     return row
 
 
+# Equality (not BINARY wrapping) keeps the case-sensitive unique index on
+# canonical_permission usable through the deployed views. Exact-case lookup
+# still uses BINARY IN on the WHERE clause.
+_V1_PERMISSION_SELECT = f"""
+        SELECT sp.catalog_release_id, sp.catalog_digest, sp.canonical_permission,
+               sp.symbolic_name, sp.namespace, sp.defining_package, sp.authority_class,
+               sp.lifecycle, sp.accepted_platform_release, sp.source_provenance_status,
+               sp.protection_base, sp.protection_modifiers,
+               sp.compatibility_protection_expression,
+               p.identity_status, p.feature_dependency, p.permission_group,
+               p.background_permission, p.source_snapshot_id
+          FROM {V1_SCYTALEDROID_PERMISSION_VIEW} sp
+          LEFT JOIN {V1_CURRENT_PERMISSION_VIEW} p
+            ON p.canonical_permission = sp.canonical_permission
+           AND p.catalog_release_id = sp.catalog_release_id
+           AND p.catalog_digest = sp.catalog_digest
+"""
+
+
+def _materialize_v1_permission_rows(
+    rows: Sequence[Mapping[str, Any]] | None, gate: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    materialized = [
+        {
+            **dict(row),
+            "scope_complete": bool(gate.get("exhaustive_scope")),
+            "reference_mode": V1_REFERENCE_MODE,
+        }
+        for row in rows or []
+    ]
+    if len(materialized) != len({row.get("canonical_permission") for row in materialized}):
+        raise RuntimeError("Permission Intel interpretation returned duplicate identity rows")
+    for row in materialized:
+        version = row.get("interpretation_contract_version")
+        if version is None or str(version).strip() == "":
+            continue
+        if str(version) not in SUPPORTED_V1_INTERPRETATION_CONTRACTS:
+            raise RuntimeError("Permission Intel interpretation contract is unsupported")
+    return materialized
+
+
 def fetch_v1_permission_rows(values: Sequence[str]) -> list[dict[str, Any]]:
-    """Return exact-case v1 platform references with structured protection fields."""
+    """Return exact-case accepted v1 platform references from deployed views."""
     items_list: list[str] = []
     for value in values:
         if not isinstance(value, str) or not value.strip():
@@ -410,25 +515,13 @@ def fetch_v1_permission_rows(values: Sequence[str]) -> list[dict[str, Any]]:
     placeholders = ",".join(["%s"] * len(items))
     rows = run_sql(
         f"""
-        SELECT catalog_release_id, catalog_digest, interpretation_contract_version,
-               canonical_permission,
-               symbolic_name, namespace, defining_package, authority_class,
-               identity_status, identity_recognition_state, declaration_state,
-               applicability_state, protection_state, evidence_basis,
-               scalar_projection_status, lifecycle, accepted_platform_release,
-               source_snapshot_id, declaration_evidence_status,
-               protection_base, protection_modifiers,
-               compatibility_protection_expression, background_permission,
-               permission_group, feature_dependency,
-               current_declaration_revision_count,
-               historical_declaration_revision_count, unresolved_conflict_count
-         FROM android_permission_v1_1_scytaledroid_permission
-         WHERE BINARY canonical_permission IN ({placeholders})
-           AND authority_class IN (
+        {_V1_PERMISSION_SELECT}
+         WHERE BINARY sp.canonical_permission IN ({placeholders})
+           AND sp.authority_class IN (
                'AOSP_PUBLIC', 'AOSP_HIDDEN', 'AOSP_INTERNAL', 'AOSP_MODULE'
            )
-           AND catalog_release_id = %s
-           AND catalog_digest = %s
+           AND sp.catalog_release_id = %s
+           AND sp.catalog_digest = %s
         """,
         (*items, gate["catalog_release_id"], gate["catalog_digest"]),
         fetch="all",
@@ -436,45 +529,20 @@ def fetch_v1_permission_rows(values: Sequence[str]) -> list[dict[str, Any]]:
         query_name="permission_intel.fetch_v1_permission_rows",
         read_only=True,
     )
-    materialized = [
-        {
-            **dict(row),
-            "scope_complete": bool(gate.get("exhaustive_scope")),
-            "reference_mode": "SHADOW_READ_ONLY",
-        }
-        for row in rows or []
-    ]
-    if len(materialized) != len({row.get("canonical_permission") for row in materialized}):
-        raise RuntimeError("Permission Intel interpretation returned duplicate identity rows")
-    if any(row.get("interpretation_contract_version") != "1.1.0-draft" for row in materialized):
-        raise RuntimeError("Permission Intel interpretation contract is unsupported")
-    return materialized
+    return _materialize_v1_permission_rows(rows, gate)
 
 
 def fetch_v1_permission_catalog_rows() -> list[dict[str, Any]]:
-    """Return the complete accepted v1 Scytale projection after the compatibility gate."""
+    """Return the accepted v1 Scytale projection from deployed catalog views."""
     gate = fetch_v1_catalog_gate()
     rows = run_sql(
-        """
-        SELECT catalog_release_id, catalog_digest, interpretation_contract_version,
-               canonical_permission,
-               symbolic_name, namespace, defining_package, authority_class,
-               identity_status, identity_recognition_state, declaration_state,
-               applicability_state, protection_state, evidence_basis,
-               scalar_projection_status, lifecycle, accepted_platform_release,
-               source_snapshot_id, declaration_evidence_status,
-               protection_base, protection_modifiers,
-               compatibility_protection_expression, background_permission,
-               permission_group, feature_dependency,
-               current_declaration_revision_count,
-               historical_declaration_revision_count, unresolved_conflict_count
-         FROM android_permission_v1_1_scytaledroid_permission
-         WHERE authority_class IN (
+        f"""
+        {_V1_PERMISSION_SELECT}
+         WHERE sp.authority_class IN (
                'AOSP_PUBLIC', 'AOSP_HIDDEN', 'AOSP_INTERNAL', 'AOSP_MODULE'
            )
-           AND catalog_release_id = %s
-           AND catalog_digest = %s
-         ORDER BY BINARY canonical_permission
+           AND sp.catalog_release_id = %s
+           AND sp.catalog_digest = %s
         """,
         (gate["catalog_release_id"], gate["catalog_digest"]),
         fetch="all",
@@ -482,19 +550,7 @@ def fetch_v1_permission_catalog_rows() -> list[dict[str, Any]]:
         query_name="permission_intel.fetch_v1_permission_catalog_rows",
         read_only=True,
     )
-    materialized = [
-        {
-            **dict(row),
-            "scope_complete": bool(gate.get("exhaustive_scope")),
-            "reference_mode": "SHADOW_READ_ONLY",
-        }
-        for row in rows or []
-    ]
-    if len(materialized) != len({row.get("canonical_permission") for row in materialized}):
-        raise RuntimeError("Permission Intel interpretation returned duplicate identity rows")
-    if any(row.get("interpretation_contract_version") != "1.1.0-draft" for row in materialized):
-        raise RuntimeError("Permission Intel interpretation contract is unsupported")
-    return materialized
+    return _materialize_v1_permission_rows(rows, gate)
 
 
 def fetch_aosp_permission_dict_rows(
@@ -518,8 +574,8 @@ def fetch_aosp_permission_dict_rows(
                added_in_api_level,
                deprecated_in_api_level
         FROM android_permission_dict_aosp
-        WHERE LOWER(constant_value) IN ({placeholders})
-          AND COALESCE(lifecycle_status, '') <> 'invalid_token'
+        WHERE constant_value_norm IN ({placeholders})
+          AND {_AOSP_ACTIVE_LIFECYCLE_SQL}
         """
         params: ParamsType = tuple(v.lower() for v in items)
     else:
@@ -535,7 +591,7 @@ def fetch_aosp_permission_dict_rows(
                deprecated_in_api_level
         FROM android_permission_dict_aosp
         WHERE constant_value IN ({placeholders})
-          AND COALESCE(lifecycle_status, '') <> 'invalid_token'
+          AND {_AOSP_ACTIVE_LIFECYCLE_SQL}
         """
         params = items
     rows = run_sql(
@@ -565,7 +621,7 @@ def fetch_aosp_permission_name_rows(names: Sequence[str]) -> list[tuple[object, 
                deprecated_in_api_level
         FROM android_permission_dict_aosp
         WHERE name IN ({placeholders})
-          AND COALESCE(lifecycle_status, '') <> 'invalid_token'
+          AND {_AOSP_ACTIVE_LIFECYCLE_SQL}
         """,
         items,
         fetch="all",
@@ -604,7 +660,7 @@ def fetch_current_permission_interpretation_rows(
                p.permission_id, p.canonical_permission, p.authority_class,
                p.lifecycle AS catalog_lifecycle, p.feature_dependency,
                sp.compatibility_protection_expression AS catalog_protection,
-               COUNT(c.conflict_id) AS unresolved_conflict_count,
+               COALESCE(c.unresolved_conflict_count, 0) AS unresolved_conflict_count,
                f.permission_string AS fact_permission_string,
                f.fact_scope, f.authority_source_type AS fact_source_type,
                f.lifecycle_status AS fact_lifecycle, f.defining_package,
@@ -620,12 +676,15 @@ def fetch_current_permission_interpretation_rows(
           LEFT JOIN android_permission_v1_current_permission p
             ON LOWER(p.canonical_permission) = requested.lookup_token_norm
           LEFT JOIN android_permission_v1_scytaledroid_permission sp
-            ON BINARY sp.canonical_permission = BINARY p.canonical_permission
+            ON sp.canonical_permission = p.canonical_permission
            AND sp.catalog_release_id = p.catalog_release_id
            AND sp.catalog_digest = p.catalog_digest
-          LEFT JOIN api_permission_declaration_conflict c
-            ON c.permission_id = p.permission_id
-           AND c.resolution_status = 'UNRESOLVED'
+          LEFT JOIN (
+            SELECT permission_id, COUNT(*) AS unresolved_conflict_count
+            FROM api_permission_declaration_conflict
+            WHERE resolution_status = 'UNRESOLVED'
+            GROUP BY permission_id
+          ) c ON c.permission_id = p.permission_id
           LEFT JOIN android_permission_authority_fact f
             ON f.permission_string_norm = requested.lookup_token_norm
            AND f.is_current_best = 1
@@ -647,7 +706,8 @@ def fetch_current_permission_interpretation_rows(
                   a.source_family_key, a.authority_source_type,
                   a.lifecycle_status, p.permission_id, p.canonical_permission,
                   p.authority_class, p.lifecycle, p.feature_dependency,
-                  sp.compatibility_protection_expression, f.permission_string,
+                  sp.compatibility_protection_expression,
+                  c.unresolved_conflict_count, f.permission_string,
                   f.fact_scope,
                   f.authority_source_type, f.lifecycle_status,
                   f.defining_package, f.protection_level,
@@ -827,6 +887,7 @@ __all__ = [
     "GOVERNANCE_ROWS_TABLE",
     "GOVERNANCE_SNAPSHOTS_TABLE",
     "MANAGED_TABLES",
+    "INTERPRETATION_SURFACES",
     "OEM_DICT_TABLE",
     "OEM_PREFIX_META_TABLE",
     "OEM_VENDOR_META_TABLE",
@@ -838,6 +899,11 @@ __all__ = [
     "SUPPORTED_V1_SCHEMA_CONTRACT",
     "SUPPORTED_V1_SCHEMA_RELEASE_STATUS",
     "SUPPORTED_V1_SCHEMA_VERSION",
+    "SUPPORTED_V1_INTERPRETATION_CONTRACTS",
+    "V1_REFERENCE_MODE",
+    "V1_CATALOG_RELEASE_VIEW",
+    "V1_CURRENT_PERMISSION_VIEW",
+    "V1_SCYTALEDROID_PERMISSION_VIEW",
     "describe_target",
     "fetch_database_definers",
     "fetch_aosp_permission_dict_rows",
@@ -848,6 +914,7 @@ __all__ = [
     "fetch_v1_permission_catalog_rows",
     "fetch_v1_permission_rows",
     "fetch_oem_permission_dict_rows",
+    "fetch_oem_permission_catalog_rows",
     "fetch_signal_catalog_rows",
     "fetch_vendor_meta_rows",
     "fetch_vendor_prefix_rule_rows",

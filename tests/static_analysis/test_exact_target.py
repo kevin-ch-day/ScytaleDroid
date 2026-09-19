@@ -706,3 +706,11 @@ def test_count_linkable_dynamic_sessions_for_hash_uses_typed_static_run_expressi
     sql = str(captured["sql"])
     assert "ds.static_run_id_u" in sql
     assert "CAST(ds.static_run_id AS UNSIGNED)" in sql
+
+
+def test_exact_target_hash_lookups_use_column_equality() -> None:
+    source = Path(exact_target.__file__).read_text(encoding="utf-8")
+    assert "LOWER(TRIM(r.sha256))" not in source
+    assert "LOWER(TRIM(base_apk_sha256))" not in source
+    assert "r.sha256 = %s" in source
+    assert "base_apk_sha256 = %s" in source

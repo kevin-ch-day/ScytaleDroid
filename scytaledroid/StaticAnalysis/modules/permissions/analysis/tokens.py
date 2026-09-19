@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from .curves import independent_risk_combine
+from .name_patterns import is_background_sensitive_name, is_health_permission_name
+
 _SPECIAL_ACCESS_TOKENS = frozenset({"appop", "preinstalled", "development"})
 
 _SPECIAL_RISK_NORMAL_SHORTS = frozenset(
@@ -54,12 +57,38 @@ _NOISY_CUSTOM_TOKENS = (
 _TOKEN_WEIGHTS = {
     "dangerous": 60,
     "signature": 80,
+    "signatureorsystem": 80,
+    "signatureorinstaller": 80,
+    "internal": 75,
     "privileged": 70,
     "development": 40,
     "installer": 35,
     "appop": 45,
     "preinstalled": 30,
     "oem": 25,
+    "role": 25,
+    "vendorprivileged": 40,
+    "knownsigner": 35,
+    "recents": 20,
+    "module": 20,
+    "verifier": 25,
+    "setup": 15,
+    "companion": 20,
+    "instant": 8,
+    "pre23": 5,
+    "retaildemo": 8,
+    "incidentreportapprover": 20,
+    "system": 15,
+    "runtime": 10,
+    "configurator": 15,
+}
+_MAX_PERMISSION_SEVERITY = 255
+_TOKEN_COMBINE_SCALE = 180
+_HEALTH_NAME_FLOOR = 60
+_GROUP_SCORE_BONUS = {
+    "HEALTH": 15,
+    "SENSORS": 10,
+    "PHONE": 10,
 }
 
 
@@ -94,13 +123,8 @@ def normalize_tokens(detail_entry: Sequence[object]) -> tuple[str, ...]:
 def tokens_from_db(value: object | None) -> tuple[str, ...] | None:
     if value is None:
         return None
-    low = str(value).strip().lower()
-    if not low:
-        return None
-    # Map DB protection to canonical token set
-    if low in {"dangerous", "signature", "normal"}:
-        return (low,)
-    return None
+    tokens = tuple(sorted(tokenise_protection(value)))
+    return tokens or None
 
 
 def is_special_access(tokens: Sequence[str]) -> bool:
@@ -111,15 +135,73 @@ def is_custom_permission(name: str) -> bool:
     return not str(name).startswith("android.permission.")
 
 
+def _canonical_group_short(value: object) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.lower().startswith("android.permission-group."):
+        text = text.rsplit(".", 1)[-1]
+    if text.upper() == "UNDEFINED":
+        return None
+    return text
+
+
 def score_tokens(tokens: Sequence[str], *, is_custom: bool) -> int:
-    score = 0
-    for token in tokens:
-        score += _TOKEN_WEIGHTS.get(token, 0)
-    if "signature" in tokens and "privileged" in tokens:
-        score += 20
-    if "dangerous" in tokens and "appop" in tokens:
-        score += 15
-    return score
+    return score_permission(tokens, is_custom=is_custom)
+
+
+def score_permission(
+    tokens: Sequence[str],
+    *,
+    is_custom: bool = False,
+    name: str | None = None,
+    permission_group: str | None = None,
+    background_permission: str | None = None,
+    authority_class: str | None = None,
+    feature_dependency: str | None = None,
+) -> int:
+    """Score one permission from PI protection tokens plus catalog context.
+
+    Protection modifiers and catalog context share one impact dimension, so
+    they combine with the CVSS Impact Sub-Score (noisy-OR) identity rather
+    than a linear sum that re-hits the 255 cap. Severity is still clipped at
+    255 to match ``static_permission_matrix.severity``.
+    """
+
+    del is_custom
+    token_set = {str(token).strip().lower() for token in tokens if token}
+    impact_weights: list[float] = [
+        float(_TOKEN_WEIGHTS[token]) for token in token_set if token in _TOKEN_WEIGHTS
+    ]
+    if is_health_permission_name(name) and (
+        not impact_weights or max(impact_weights) < _HEALTH_NAME_FLOOR
+    ):
+        impact_weights.append(float(_HEALTH_NAME_FLOOR))
+    if any(token.startswith("signature") for token in token_set) and "privileged" in token_set:
+        impact_weights.append(20.0)
+    if "dangerous" in token_set and "appop" in token_set:
+        impact_weights.append(15.0)
+    if "signature" in token_set and "role" in token_set:
+        impact_weights.append(10.0)
+    if "internal" in token_set and "appop" in token_set:
+        impact_weights.append(10.0)
+    if str(background_permission or "").strip():
+        impact_weights.append(20.0)
+    if is_background_sensitive_name(name):
+        impact_weights.append(25.0)
+    group = _canonical_group_short(permission_group)
+    if group:
+        group_bonus = _GROUP_SCORE_BONUS.get(group.upper(), 0)
+        if group_bonus:
+            impact_weights.append(float(group_bonus))
+    elif is_health_permission_name(name):
+        impact_weights.append(float(_GROUP_SCORE_BONUS["HEALTH"]))
+    if str(authority_class or "").strip().upper() == "AOSP_INTERNAL":
+        impact_weights.append(8.0)
+    if str(feature_dependency or "").strip():
+        impact_weights.append(4.0)
+    score = independent_risk_combine(impact_weights, scale=float(_TOKEN_COMBINE_SCALE))
+    return min(_MAX_PERMISSION_SEVERITY, int(round(score)))
 
 
 def classify_flagged_normal(
@@ -134,6 +216,8 @@ def classify_flagged_normal(
     is_custom: bool,
 ) -> str | None:
     if is_runtime_dangerous or is_signature or is_privileged:
+        return None
+    if any(str(token).lower() == "internal" for token in tokens):
         return None
 
     normalized = str(name or "").strip()
@@ -172,6 +256,7 @@ __all__ = [
     "is_special_access",
     "is_custom_permission",
     "score_tokens",
+    "score_permission",
     "classify_flagged_normal",
     "is_scored_flagged_normal",
 ]

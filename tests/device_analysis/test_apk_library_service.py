@@ -225,3 +225,38 @@ def test_register_legacy_receipt_reconstructs_plan_from_receipt() -> None:
     assert entry.package_name == "com.example.app"
     assert entry.version_code == "1"
     assert entry.artifacts[0].sha256 == digest
+
+
+def test_plan_from_legacy_receipt_infers_base_when_is_base_omitted() -> None:
+    plan = apk_library_service._plan_from_legacy_receipt(
+        {
+            "package": {"package_name": "com.example.app", "version_code": "1", "version_name": "1.0"},
+            "inventory": {"apk_paths": ["/data/app/com.example.app/base.apk"]},
+            "planning": {
+                "expected_artifacts": [
+                    {
+                        "file_name": "com_example_app_1__base.apk",
+                        "planned_source_path": "/data/app/com.example.app/base.apk",
+                        "split_label": "base",
+                    }
+                ]
+            },
+        }
+    )
+
+    assert plan is not None
+    assert plan.artifacts[0].is_split_member is False
+
+
+def test_matching_observed_artifact_infers_base_without_flag() -> None:
+    planned = make_artifact_plan(
+        source_path="/data/app/com.example.app/base.apk",
+        artifact="base",
+        file_name="com_example_app_1__base.apk",
+        is_split_member=False,
+    )
+    item = apk_library_service._matching_observed_artifact(
+        planned,
+        [{"file_name": "com_example_app_1__base.apk", "split_label": "base"}],
+    )
+    assert item is not None

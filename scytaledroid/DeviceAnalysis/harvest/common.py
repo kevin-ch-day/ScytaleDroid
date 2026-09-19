@@ -18,6 +18,7 @@ from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
+from . import rules
 from .models import ArtifactError, InventoryRow
 
 _EVIDENCE_SLUG = re.compile(r"[^A-Za-z0-9._-]+")
@@ -509,8 +510,14 @@ def inventory_payload(inventory: InventoryRow) -> dict[str, str | None]:
 
 
 def is_system_package(inventory: InventoryRow) -> bool:
-    category = (inventory.category or "").lower() if inventory.category else ""
-    return category != "user"
+    """Treat missing category as user when the APK lives under ``/data/``."""
+
+    category = (inventory.category or "").strip().lower()
+    if category == "user":
+        return False
+    if rules.is_user_path(inventory.primary_path):
+        return False
+    return True
 
 
 def cleanup_duplicate(dest_path: Path) -> None:

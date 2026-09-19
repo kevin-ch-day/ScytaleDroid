@@ -620,7 +620,6 @@ def analyze_apk(
     # Permissions (resilient)
     declared_permissions = tuple(sorted(apk.get_permissions() or ()))
     permission_details = _safe_permission_details(apk, report_metadata)
-    dangerous = collect_dangerous_permissions(permission_details)
     custom_permissions = tuple(sorted(apk.get_declared_permissions() or ()))
     custom_definitions = collect_custom_permission_definitions(manifest_root)
     if report_metadata.get("is_split_member") is True:
@@ -664,8 +663,23 @@ def analyze_apk(
         )
         if levels:
             protection_levels[name] = levels
-
-    catalog_snapshot = permission_catalog.to_snapshot(declared_permissions)
+    protection_levels = permission_catalog.merge_protection_levels(
+        (*declared_permissions, *custom_permissions),
+        existing=protection_levels,
+    )
+    dangerous = tuple(
+        sorted(
+            set(collect_dangerous_permissions(permission_details))
+            | {
+                name
+                for name, levels in protection_levels.items()
+                if any(str(token).lower() == "dangerous" for token in levels)
+            }
+        )
+    )
+    catalog_snapshot = permission_catalog.to_snapshot(
+        (*declared_permissions, *custom_permissions)
+    )
 
     permissions = PermissionSummary(
         declared=declared_permissions,

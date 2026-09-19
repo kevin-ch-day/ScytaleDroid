@@ -171,6 +171,8 @@ def _hydrate_missing_rows_from_adb(
         return []
     # Local import to avoid adding hard adb deps at module import time.
     from scytaledroid.DeviceAnalysis.adb import packages as adb_packages  # type: ignore
+    from scytaledroid.DeviceAnalysis.inventory.normalizer import derive_inventory_category
+    from scytaledroid.DeviceAnalysis import package_profiles
     from scytaledroid.DeviceAnalysis.runtime_flags import allow_inventory_fallbacks
 
     allow_fallbacks = allow_inventory_fallbacks()
@@ -197,28 +199,35 @@ def _hydrate_missing_rows_from_adb(
         except Exception:
             continue
         vcode, vname = version_map.get(pkg, (None, None))
+        app_label = _maybe_str(meta.get("app_label") or meta.get("label"))
+        if app_label and app_label.lower() == pkg.lower():
+            app_label = None
+        primary_path = apk_paths[0] if apk_paths else None
+        profile = package_profiles.lookup_profile(pkg)
         raw = {
             "package_name": pkg,
             "apk_paths": apk_paths,
             "split_count": len(apk_paths),
-            "primary_path": (apk_paths[0] if apk_paths else None),
-            "app_label": meta.get("app_label") or meta.get("label") or None,
+            "primary_path": primary_path,
+            "app_label": app_label,
             "version_name": meta.get("version_name") or vname or None,
             "version_code": meta.get("version_code") or vcode or None,
             "installer": meta.get("installer") or None,
             "signer_cert_digest": meta.get("signer_cert_digest") or None,
             "signer_set_hash": meta.get("signer_set_hash") or None,
+            "category": derive_inventory_category(primary_path),
+            "profile_key": profile.id.upper() if profile else None,
         }
         hydrated.append(
             InventoryRow(
                 raw=raw,
                 package_name=pkg,
-                app_label=_maybe_str(raw.get("app_label")),
+                app_label=app_label,
                 installer=_maybe_str(raw.get("installer")),
-                category=None,
+                category=_maybe_str(raw.get("category")),
                 primary_path=_maybe_str(raw.get("primary_path")),
-                profile_key=None,
-                profile=None,
+                profile_key=_maybe_str(raw.get("profile_key")),
+                profile=profile.name if profile else None,
                 version_name=_maybe_str(raw.get("version_name")),
                 version_code=_maybe_str(raw.get("version_code")),
                 apk_paths=[str(p).strip() for p in apk_paths if str(p).strip()],

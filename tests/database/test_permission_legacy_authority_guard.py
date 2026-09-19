@@ -185,6 +185,7 @@ def test_scytale_requires_definition_scope_and_resolved_oem_relationship() -> No
 
 
 def test_scytale_rejects_conflicting_rows_for_one_requested_token(monkeypatch) -> None:
+    current_interpretation.clear_interpretation_cache()
     token = "vendor.example.permission.ACCESS"
     monkeypatch.setattr(
         current_interpretation.permission_intel,
@@ -199,6 +200,7 @@ def test_scytale_rejects_conflicting_rows_for_one_requested_token(monkeypatch) -
 
 
 def test_scytale_does_not_collapse_padded_and_clean_lookup_keys(monkeypatch) -> None:
+    current_interpretation.clear_interpretation_cache()
     clean = "android.permission.CAMERA"
     padded = f" {clean}"
     monkeypatch.setattr(
@@ -289,3 +291,27 @@ def test_scytale_legacy_entry_and_scalar_adapters_fail_closed(monkeypatch) -> No
         "DEVICE_POWER": None,
         "DETECT_SCREEN_RECORDING": None,
     }
+
+
+def test_fetch_current_interpretations_caches_token_batches(monkeypatch) -> None:
+    current_interpretation.clear_interpretation_cache()
+    calls: list[tuple[str, ...]] = []
+
+    def _rows(values):
+        calls.append(tuple(values))
+        return []
+
+    monkeypatch.setattr(
+        current_interpretation.permission_intel,
+        "fetch_current_permission_interpretation_rows",
+        _rows,
+    )
+    current_interpretation.fetch_current_interpretations(["android.permission.INTERNET"])
+    current_interpretation.fetch_current_interpretations(["android.permission.INTERNET"])
+    assert calls == [("android.permission.INTERNET",)]
+    current_interpretation.clear_interpretation_cache()
+    current_interpretation.fetch_current_interpretations(["android.permission.INTERNET"])
+    assert calls == [
+        ("android.permission.INTERNET",),
+        ("android.permission.INTERNET",),
+    ]

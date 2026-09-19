@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-# ``findings`` / ``buckets`` / ``metrics`` / ``contributors`` below are legacy mirror names kept in
-# the scientific UoW envelope for observability and transaction bookkeeping. Current static writers
-# do not INSERT into those tables (``AGENTS.md``); retire names only after reader removal — see
-# ``docs/maintenance/legacy_static_deprecation_playbook.md``.
+# Scientific UoW is canonical persist only. Legacy-five names (``runs`` / ``findings`` /
+# ``buckets`` / ``metrics`` / ``contributors``) stay out of this envelope — current writers
+# do not INSERT there (``AGENTS.md``).
 
 SCIENTIFIC_UOW_TABLES = frozenset(
     {
@@ -17,7 +16,6 @@ SCIENTIFIC_UOW_TABLES = frozenset(
         # Canonical findings and observation rows.
         "static_analysis_findings",
         "static_finding_evidence_payloads",
-        "findings",
         "static_correlation_results",
         "static_fileproviders",
         "static_provider_acl",
@@ -25,10 +23,6 @@ SCIENTIFIC_UOW_TABLES = frozenset(
         "risk_scores",
         "static_permission_risk_vnext",
         "static_permission_matrix",
-        # Metrics + contributors + section writers.
-        "buckets",
-        "metrics",
-        "contributors",
         "masvs_control_coverage",
         "static_findings_summary",
         "static_findings",

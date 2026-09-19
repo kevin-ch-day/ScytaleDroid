@@ -150,19 +150,25 @@ def get_lock_health_snapshot(*, limit: int = 20) -> dict[str, Any]:
 def check_required_tables(required_tables: list[str]) -> dict[str, bool]:
     """Return a mapping of table name → existence flag for *required_tables*."""
 
-    status: dict[str, bool] = {}
+    names = [str(table) for table in required_tables]
+    status: dict[str, bool] = {name: False for name in names}
+    if not names:
+        return status
     try:
         with _connected_engine() as engine:
-            for table in required_tables:
-                result = engine.fetch_one(
-                    "SELECT COUNT(*) FROM information_schema.tables "
-                    "WHERE table_schema = DATABASE() AND table_name = %s;",
-                    (table,),
-                )
-                status[table] = bool(result and int(result[0]) > 0)
+            placeholders = ", ".join(["%s"] * len(names))
+            rows = engine.fetch_all(
+                "SELECT table_name FROM information_schema.tables "
+                f"WHERE table_schema = DATABASE() AND table_name IN ({placeholders})",
+                tuple(names),
+            )
+        present = {str(row[0]) for row in rows or [] if row}
+        present_folded = {name.casefold(): name for name in present}
+        for name in names:
+            status[name] = name in present or name.casefold() in present_folded
     except Exception as exc:  # pragma: no cover - relies on external MySQL
         print(f"[DB_UTILS] Failed to check tables: {exc}")
-        for table in required_tables:
+        for table in names:
             status.setdefault(table, False)
     return status
 

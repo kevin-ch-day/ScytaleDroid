@@ -37,13 +37,16 @@ def compose_inventory_entry(
     publisher_name = canonical.get("publisher_name") if canonical else None
     publisher_source = "apps_join" if publisher_key or publisher_name else "fallback"
     heuristic_profile = False
-    if not profile_key and not profile_name:
+    canonical_profile = str(profile_key or "").strip().upper()
+    # UNCLASSIFIED/UNKNOWN are placeholders, not classifications. If we treat them
+    # as canonical, lookup_profile never runs again after the first apps sync.
+    if canonical_profile in _PLACEHOLDER_PROFILES:
         profile = package_profiles.lookup_profile(package_name)
-        profile_key = profile.id.upper() if profile else None
-        profile_name = profile.name if profile else None
-        heuristic_profile = bool(profile_key or profile_name)
-        if heuristic_profile:
-            profile_source = "inferred_partition"
+        if profile:
+            profile_key = profile.id.upper()
+            profile_name = profile.name
+            heuristic_profile = True
+            profile_source = "package_profile_heuristic"
 
     if not profile_key:
         profile_key = "UNCLASSIFIED"
@@ -68,14 +71,18 @@ def compose_inventory_entry(
     package_lower = cleaned_package.lower()
     canonical_clean = canonical_label.strip() if isinstance(canonical_label, str) else None
     metadata_clean = metadata_label.strip() if isinstance(metadata_label, str) else None
-    if canonical_clean and canonical_clean.lower() != package_lower:
+    if canonical_clean and canonical_clean.lower() == package_lower:
+        canonical_clean = None
+    if metadata_clean and metadata_clean.lower() == package_lower:
+        metadata_clean = None
+    if canonical_clean:
         app_label = canonical_clean
     elif metadata_clean:
         app_label = metadata_clean
-    elif canonical_clean:
-        app_label = canonical_clean
     else:
-        app_label = cleaned_package
+        # Android 15 dumpsys omits application-label. Do not pretend the package
+        # name is a human-readable title.
+        app_label = None
     version_name = metadata.get("version_name")
     version_code = metadata.get("version_code")
 
@@ -142,6 +149,8 @@ def compose_inventory_entry(
     return entry
 
 
+_PLACEHOLDER_PROFILES = {"", "UNCLASSIFIED", "UNKNOWN"}
+
 _CATEGORY_ORDER = {
     "User": 0,
     "OEM": 1,
@@ -151,6 +160,16 @@ _CATEGORY_ORDER = {
     "Other": 5,
     "Unknown": 6,
 }
+
+
+def derive_inventory_category(primary_path: str | None) -> str | None:
+    """Return the partition-derived category for a device APK path."""
+
+    path = str(primary_path or "").strip()
+    if not path:
+        return None
+    category_name, _partition = _derive_category(path)
+    return category_name
 
 
 def _derive_category(primary_path: str) -> tuple[str, str]:

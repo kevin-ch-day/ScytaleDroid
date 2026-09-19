@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 
 from ...db_core import permission_intel as intel_db
 from .current_interpretation import fetch_current_interpretations
@@ -119,15 +120,17 @@ def fetch_oem_entries(values: Iterable[str]) -> dict[str, Mapping[str, object]]:
     return out
 
 
-def fetch_vendor_prefix_rules() -> list[Mapping[str, object]]:
+@lru_cache(maxsize=1)
+def fetch_vendor_prefix_rules() -> tuple[Mapping[str, object], ...]:
     rows = intel_db.fetch_vendor_prefix_rule_rows()
-    return [
+    return tuple(
         {"vendor_id": row[0], "namespace_prefix": row[1], "match_type": row[2]}
         for row in rows
         if row
-    ]
+    )
 
 
+@lru_cache(maxsize=1)
 def fetch_vendor_meta() -> dict[int, VendorHint]:
     rows = intel_db.fetch_vendor_meta_rows()
     out: dict[int, VendorHint] = {}

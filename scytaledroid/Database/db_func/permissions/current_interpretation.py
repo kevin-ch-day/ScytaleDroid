@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 from scytaledroid.Database.db_core import permission_intel
 
@@ -198,10 +199,10 @@ def interpret_permission_row(token: str, row: dict[str, object]) -> PermissionIn
     )
 
 
-def fetch_current_interpretations(values: list[str]) -> dict[str, PermissionInterpretation]:
-    tokens = tuple(
-        dict.fromkeys(value for value in values if isinstance(value, str) and value.strip())
-    )
+@lru_cache(maxsize=64)
+def _interpretations_for_tokens(
+    tokens: tuple[str, ...],
+) -> tuple[tuple[str, PermissionInterpretation], ...]:
     rows = permission_intel.fetch_current_permission_interpretation_rows(tokens)
     by_norm: dict[str, dict[str, object]] = {}
     for row in rows:
@@ -215,13 +216,29 @@ def fetch_current_interpretations(values: list[str]) -> dict[str, PermissionInte
         if key in by_norm and by_norm[key] != materialized:
             raise RuntimeError(f"conflicting Permission Intel evidence for requested token: {key}")
         by_norm[key] = materialized
-    return {
-        token: interpret_permission_row(token, by_norm.get(token.lower(), {})) for token in tokens
-    }
+    return tuple(
+        (token, interpret_permission_row(token, by_norm.get(token.lower(), {}))) for token in tokens
+    )
+
+
+def fetch_current_interpretations(values: list[str]) -> dict[str, PermissionInterpretation]:
+    tokens = tuple(
+        dict.fromkeys(value for value in values if isinstance(value, str) and value.strip())
+    )
+    if not tokens:
+        return {}
+    return dict(_interpretations_for_tokens(tokens))
+
+
+def clear_interpretation_cache() -> None:
+    """Drop cached interpretation batches (tests that stub the Intel reader)."""
+
+    _interpretations_for_tokens.cache_clear()
 
 
 __all__ = [
     "PermissionInterpretation",
+    "clear_interpretation_cache",
     "fetch_current_interpretations",
     "interpret_permission_row",
 ]

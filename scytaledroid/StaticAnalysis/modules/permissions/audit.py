@@ -58,6 +58,9 @@ class AppSignals:
     exact_alarms: bool = False
     request_install: bool = False
     clipboard_bg: bool = False
+    background_camera: bool = False
+    background_audio: bool = False
+    health_data: bool = False
 
     def as_dict(self) -> dict[str, bool]:
         return self.__dict__.copy()
@@ -74,10 +77,19 @@ def compute_signal_flags(
 ) -> AppSignals:
     """Derive boolean signal flags using group strengths and permission names."""
 
-    perms = {perm.upper() for perm in permissions}
+    perms = {str(perm).upper() for perm in permissions if perm}
 
     def has_any(*candidates: str) -> bool:
-        return any(name.upper() in perms for name in candidates)
+        wanted = {name.upper() for name in candidates if name}
+        if not wanted:
+            return False
+        for perm in perms:
+            if perm in wanted:
+                return True
+            short = perm.rsplit(".", 1)[-1]
+            if short in wanted:
+                return True
+        return False
 
     return AppSignals(
         camera=groups.get("CAM", 0) >= 1,
@@ -103,6 +115,10 @@ def compute_signal_flags(
         exact_alarms=has_any("SCHEDULE_EXACT_ALARM"),
         request_install=has_any("REQUEST_INSTALL_PACKAGES"),
         clipboard_bg=has_any("READ_CLIPBOARD_IN_BACKGROUND"),
+        background_camera=has_any("BACKGROUND_CAMERA"),
+        background_audio=has_any("RECORD_BACKGROUND_AUDIO"),
+        health_data=any(".HEALTH." in perm for perm in perms)
+        or has_any("READ_HEALTH_DATA_IN_BACKGROUND", "HEALTH_CONNECT"),
     )
 
 

@@ -5,9 +5,9 @@ Session identifiers (read carefully):
 - **Canonical SAR** rows on ``static_analysis_runs`` are filtered by ``session_label`` in this module
   (see ``_canonical_direct_counts``, ``_static_run_status_counts``, ``reconcile_static_session``).
 - **Compatibility / session surfaces** use ``session_stamp`` with the same string in typical CLI flows:
-  legacy ``runs`` and the still-active permission-posture ``risk_scores`` table, plus
-  ``static_findings_summary``, ``static_string_summary``, ``static_session_run_links``, and
-  ``static_session_rollups``. When label and stamp diverge, only the canonical SAR path is guaranteed
+  still-written ``risk_scores``, plus ``static_findings_summary``, ``static_string_summary``,
+  ``static_session_run_links``, and ``static_session_rollups``. Legacy-five package probes are not
+  persist-parity signals. When label and stamp diverge, only the canonical SAR path is guaranteed
   correct here.
 """
 
@@ -226,68 +226,16 @@ def _canonical_direct_counts(session_label: str) -> AuditSummary:
     }
 
 
-def _secondary_compat_package_rows(runs_session_stamp: str) -> tuple[list[Row], list[Row], list[Row], list[Row]]:
-    """Return package rows mirrored into secondary compatibility tables (``runs.session_stamp``)."""
-    findings_rows = _rows(
-        """
-        SELECT DISTINCT lr.package
-        FROM findings f
-        JOIN runs lr ON lr.run_id = f.run_id
-        WHERE lr.session_stamp=%s
-        """,
-        (runs_session_stamp,),
-    )
-    metrics_rows = _rows(
-        """
-        SELECT DISTINCT lr.package
-        FROM metrics m
-        JOIN runs lr ON lr.run_id = m.run_id
-        WHERE lr.session_stamp=%s
-        """,
-        (runs_session_stamp,),
-    )
-    buckets_rows = _rows(
-        """
-        SELECT DISTINCT lr.package
-        FROM buckets b
-        JOIN runs lr ON lr.run_id = b.run_id
-        WHERE lr.session_stamp=%s
-        """,
-        (runs_session_stamp,),
-    )
-    contributors_rows = _rows(
-        """
-        SELECT DISTINCT lr.package
-        FROM contributors c
-        JOIN runs lr ON lr.run_id = c.run_id
-        WHERE lr.session_stamp=%s
-        """,
-        (runs_session_stamp,),
-    )
-
-    return findings_rows, metrics_rows, buckets_rows, contributors_rows
-
-
 def _bridge_direct_counts(*, session_label: str, runs_session_stamp: str) -> AuditSummary:
     """Return direct-table bridge/compat audit counts.
 
-    ``session_label`` keys canonical ``static_analysis_runs`` selection elsewhere. ``runs_session_stamp`` keys
-    ``static_session_*`` link/rollup rows and legacy
-    ``runs`` / compat mirror probes (often the same string as ``session_label`` in CLI flows).
+    ``session_label`` keys canonical ``static_analysis_runs`` selection elsewhere.
+    ``runs_session_stamp`` keys ``static_session_*`` link/rollup rows and still-written
+    ``risk_scores``. Legacy-five package probes stay at zero — current persist does
+    not INSERT there, so empty tables are not a session gap.
     """
-    findings_rows, metrics_rows, buckets_rows, contributors_rows = _secondary_compat_package_rows(
-        runs_session_stamp
-    )
-
     return {
-        "runs": _row_count(
-            """
-            SELECT package
-            FROM runs
-            WHERE session_stamp=%s
-            """,
-            (runs_session_stamp,),
-        ),
+        "runs": 0,
         "risk_scores": _row_count(
             """
             SELECT package_name
@@ -296,15 +244,10 @@ def _bridge_direct_counts(*, session_label: str, runs_session_stamp: str) -> Aud
             """,
             (runs_session_stamp,),
         ),
-        "secondary_compat_mirror_packages": max(
-            len(findings_rows),
-            len(metrics_rows),
-            len(buckets_rows),
-            len(contributors_rows),
-        ),
-        "metrics_packages": len(metrics_rows),
-        "buckets_packages": len(buckets_rows),
-        "contributors_packages": len(contributors_rows),
+        "secondary_compat_mirror_packages": 0,
+        "metrics_packages": 0,
+        "buckets_packages": 0,
+        "contributors_packages": 0,
         "session_links": _scalar_count(
             """
             SELECT COUNT(*)

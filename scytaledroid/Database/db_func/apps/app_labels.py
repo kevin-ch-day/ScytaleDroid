@@ -11,6 +11,18 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 
+def usable_display_name(package_name: str | None, display_name: str | None) -> str | None:
+    """Return a human label, or None when it is empty or equal to the package id."""
+
+    pkg = str(package_name or "").strip()
+    name = str(display_name or "").strip()
+    if not name:
+        return None
+    if pkg and name.lower() == pkg.lower():
+        return None
+    return name
+
+
 def fetch_display_name_map(packages: Iterable[str]) -> dict[str, str]:
     """Best-effort map of package_name -> apps.display_name from DB.
 
@@ -32,7 +44,7 @@ def fetch_display_name_map(packages: Iterable[str]) -> dict[str, str]:
     mapping: dict[str, str] = {}
     for row in rows or []:
         pkg = str(row.get("package_name") or "").strip()
-        name = str(row.get("display_name") or "").strip()
+        name = usable_display_name(pkg, row.get("display_name"))
         if pkg and name:
             mapping[pkg] = name
     return mapping
@@ -79,7 +91,13 @@ def upsert_display_names(display_name_by_package: dict[str, str], *, overwrite: 
         INSERT INTO apps (package_name, display_name)
         VALUES (%s, %s)
         ON DUPLICATE KEY UPDATE
-          display_name = COALESCE(display_name, VALUES(display_name)),
+          display_name = CASE
+            WHEN display_name IS NULL
+              OR TRIM(display_name) = ''
+              OR LOWER(TRIM(display_name)) = LOWER(package_name)
+            THEN VALUES(display_name)
+            ELSE display_name
+          END,
           updated_at = CURRENT_TIMESTAMP
         """
 

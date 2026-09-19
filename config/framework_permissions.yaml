@@ -1,5 +1,5 @@
-# Minimal Android framework permission catalog.
-# Extend this list as needed for more complete coverage.
+# Minimal Android framework permission catalog for offline fallback.
+# Connected runs prefer Permission Intel v1 + AOSP/OEM dictionary overlays.
 - perm_name: android.permission.CAMERA
   short: CAMERA
   protection: dangerous
@@ -98,4 +98,175 @@
   deprecated_api: null
   summary: Access phone state and identifiers
   doc_url: https://developer.android.com/reference/android/Manifest.permission#READ_PHONE_STATE
+  source: default
+
+- perm_name: android.permission.INTERNET
+  short: INTERNET
+  protection: normal
+  protection_raw: normal
+  added_api: 1
+  deprecated_api: null
+  summary: Open network sockets
+  source: default
+
+- perm_name: android.permission.ACCESS_NETWORK_STATE
+  short: ACCESS_NETWORK_STATE
+  protection: normal
+  protection_raw: normal
+  added_api: 1
+  deprecated_api: null
+  summary: View network connectivity
+  source: default
+
+- perm_name: android.permission.ACCESS_WIFI_STATE
+  short: ACCESS_WIFI_STATE
+  protection: normal
+  protection_raw: normal
+  added_api: 1
+  deprecated_api: null
+  summary: View Wi-Fi state
+  source: default
+
+- perm_name: android.permission.ACCESS_BACKGROUND_LOCATION
+  short: ACCESS_BACKGROUND_LOCATION
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 29
+  deprecated_api: null
+  summary: Access location in the background
+  source: default
+
+- perm_name: android.permission.READ_SMS
+  short: READ_SMS
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Read SMS messages
+  source: default
+
+- perm_name: android.permission.SEND_SMS
+  short: SEND_SMS
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Send SMS messages
+  source: default
+
+- perm_name: android.permission.RECEIVE_SMS
+  short: RECEIVE_SMS
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Receive SMS messages
+  source: default
+
+- perm_name: android.permission.READ_CALL_LOG
+  short: READ_CALL_LOG
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Read call log
+  source: default
+
+- perm_name: android.permission.WRITE_CONTACTS
+  short: WRITE_CONTACTS
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Modify user contacts
+  source: default
+
+- perm_name: android.permission.BLUETOOTH_CONNECT
+  short: BLUETOOTH_CONNECT
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 31
+  deprecated_api: null
+  summary: Connect to paired Bluetooth devices
+  source: default
+
+- perm_name: android.permission.READ_EXTERNAL_STORAGE
+  short: READ_EXTERNAL_STORAGE
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Read shared storage
+  source: default
+
+- perm_name: android.permission.WRITE_EXTERNAL_STORAGE
+  short: WRITE_EXTERNAL_STORAGE
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Write shared storage
+  source: default
+
+- perm_name: android.permission.GET_ACCOUNTS
+  short: GET_ACCOUNTS
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Access the list of accounts
+  source: default
+
+- perm_name: android.permission.READ_CALENDAR
+  short: READ_CALENDAR
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Read calendar events
+  source: default
+
+- perm_name: android.permission.RECEIVE_BOOT_COMPLETED
+  short: RECEIVE_BOOT_COMPLETED
+  protection: normal
+  protection_raw: normal
+  added_api: 1
+  deprecated_api: null
+  summary: Receive the boot completed broadcast
+  source: default
+
+- perm_name: android.permission.WAKE_LOCK
+  short: WAKE_LOCK
+  protection: normal
+  protection_raw: normal
+  added_api: 1
+  deprecated_api: null
+  summary: Keep the processor from sleeping
+  source: default
+
+- perm_name: android.permission.FOREGROUND_SERVICE
+  short: FOREGROUND_SERVICE
+  protection: normal
+  protection_raw: normal
+  added_api: 28
+  deprecated_api: null
+  summary: Run a foreground service
+  source: default
+
+- perm_name: android.permission.QUERY_ALL_PACKAGES
+  short: QUERY_ALL_PACKAGES
+  protection: normal
+  protection_raw: normal
+  added_api: 30
+  deprecated_api: null
+  summary: Query all installed packages
+  source: default
+
+- perm_name: android.permission.READ_MEDIA_AUDIO
+  short: READ_MEDIA_AUDIO
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 33
+  deprecated_api: null
+  summary: Read shared media audio
   source: default

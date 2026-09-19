@@ -389,19 +389,9 @@ def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
               )
             """
         ),
-        completed_static_runs_missing_legacy_runs=scalar(
-            """
-            SELECT COUNT(*)
-            FROM static_analysis_runs sar
-            JOIN app_versions av ON av.id = sar.app_version_id
-            JOIN apps a ON a.id = av.app_id
-            LEFT JOIN runs r
-              ON r.session_stamp = sar.session_stamp
-             AND r.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
-            WHERE UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
-              AND r.run_id IS NULL
-            """
-        ),
+        # Empty/stale legacy ``runs`` is normal under canonical persist. Do not
+        # JOIN that table as an integrity signal.
+        completed_static_runs_missing_legacy_runs=0,
         completed_static_runs_missing_risk_scores=scalar(
             """
             SELECT COUNT(*)

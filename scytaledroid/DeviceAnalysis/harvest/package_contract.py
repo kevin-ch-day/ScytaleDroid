@@ -6,7 +6,11 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scytaledroid.DeviceAnalysis.identity import compute_split_membership_hash, resolve_hex_digest
+from scytaledroid.DeviceAnalysis.identity import (
+    compute_split_membership_hash,
+    is_base_artifact,
+    resolve_hex_digest,
+)
 from scytaledroid.DeviceAnalysis.services import artifact_store
 
 from . import common
@@ -44,7 +48,11 @@ def observed_artifact_entries(result: PullResult) -> list[dict[str, object]]:
             {
                 "split_label": artifact.artifact_label or artifact.file_name,
                 "file_name": artifact.file_name,
-                "is_base": bool(artifact.is_base) if artifact.is_base is not None else None,
+                "is_base": is_base_artifact(
+                    is_base=artifact.is_base,
+                    file_name=artifact.file_name,
+                    split_label=artifact.artifact_label,
+                ),
                 "local_artifact_path": normalise_local_path(artifact.dest_path),
                 "canonical_store_path": artifact.canonical_store_path,
                 "observed_source_path": artifact.observed_source_path or artifact.source_path,

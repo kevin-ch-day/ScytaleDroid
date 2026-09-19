@@ -236,13 +236,18 @@ def ensure_app_definition(
         column_flags = _get_definition_profile_columns()
         if category_name and category_name.strip():
             category_id = get_category_id(category_name.strip())
-            update_fields.append("category_id = %s")
+            update_fields.append("category_id = COALESCE(category_id, %s)")
             update_params.append(category_id)
 
-        if profile_key and str(profile_key).strip():
+        incoming_profile = str(profile_key).strip() if profile_key else ""
+        if incoming_profile and incoming_profile.upper() not in {"UNCLASSIFIED", "UNKNOWN"}:
             if column_flags["profile_key"]:
-                update_fields.append("profile_key = %s")
-                update_params.append(str(profile_key).strip())
+                update_fields.append(
+                    "profile_key = CASE "
+                    "WHEN profile_key IS NULL OR UPPER(TRIM(profile_key)) IN ('UNCLASSIFIED', 'UNKNOWN', '') "
+                    "THEN %s ELSE profile_key END"
+                )
+                update_params.append(incoming_profile)
             else:
                 _warn_missing_profile_columns()
 

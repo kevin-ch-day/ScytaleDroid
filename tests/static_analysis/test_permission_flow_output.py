@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.execution import analytics, permission_flow
 from scytaledroid.StaticAnalysis.cli.persistence import metrics_writer
@@ -216,6 +217,10 @@ def test_permission_flow_reuses_report_permission_metadata_before_apk_reextract(
 
 
 def test_permission_postcard_uses_detector_penalty_inputs(monkeypatch):
+    from scytaledroid.StaticAnalysis.risk import permission as risk_mod
+
+    monkeypatch.delenv("SCY_PERMISSION_RISK_TOML", raising=False)
+    monkeypatch.setattr(risk_mod, "_LOADED_WEIGHTS", None)
     monkeypatch.setattr(
         permission_console_rendering,
         "_fetch_protections",
@@ -271,9 +276,17 @@ def test_permission_postcard_uses_detector_penalty_inputs(monkeypatch):
     assert detail["special_risk_normal_count"] == 0
     assert detail["weak_guard_count"] == 1
     assert detail["modernization_credit"] == 0.8
-    assert detail["penalty_components"]["noteworthy_normal"] == 0.06
-    assert detail["penalty_components"]["flagged_normal"] == 0.06
-    assert detail["penalty_components"]["weak_guard"] == 0.08
+    from scytaledroid.StaticAnalysis.risk.permission import saturating_response
+
+    assert detail["penalty_components"]["noteworthy_normal"] == pytest.approx(
+        saturating_response(1, 0.06, 0.24)
+    )
+    assert detail["penalty_components"]["flagged_normal"] == pytest.approx(
+        saturating_response(1, 0.06, 0.24)
+    )
+    assert detail["penalty_components"]["weak_guard"] == pytest.approx(
+        saturating_response(1, 0.08, 0.50)
+    )
 
 
 def test_permission_profiles_and_metrics_prefer_manifest_extraction(monkeypatch):

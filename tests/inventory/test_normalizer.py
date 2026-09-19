@@ -79,3 +79,52 @@ def test_compose_inventory_entry_preserves_independent_package_manager_split_cou
 def test_split_count_handles_string_flags():
     entry = {"apk_paths": ["/data/app/base.apk", "/data/app/split.apk"], "split_count": "yes"}
     assert normalizer.split_count(entry) == 2
+
+
+def test_compose_inventory_entry_does_not_use_package_name_as_app_label():
+    entry = normalizer.compose_inventory_entry(
+        "com.example.app",
+        ["/data/app/base.apk"],
+        {"app_label": "com.example.app", "version_code": "1"},
+        None,
+    )
+    assert entry["app_label"] is None
+
+
+def test_compose_inventory_entry_keeps_distinct_dumpsys_label():
+    entry = normalizer.compose_inventory_entry(
+        "com.example.app",
+        ["/data/app/base.apk"],
+        {"app_label": "Example", "version_code": "1"},
+        None,
+    )
+    assert entry["app_label"] == "Example"
+
+
+def test_compose_inventory_entry_applies_profile_heuristic_when_apps_row_is_unclassified():
+    entry = normalizer.compose_inventory_entry(
+        "com.facebook.lite",
+        ["/data/app/base.apk"],
+        {"version_code": "1"},
+        {"profile_key": "UNCLASSIFIED", "profile_name": "Unclassified"},
+    )
+    assert entry["profile_key"] == "SOCIAL"
+    assert entry["inferred_profile"] is True
+    assert entry["profile_source"] == "package_profile_heuristic"
+
+
+def test_compose_inventory_entry_does_not_override_frozen_research_profile():
+    entry = normalizer.compose_inventory_entry(
+        "com.facebook.katana",
+        ["/data/app/base.apk"],
+        {"version_code": "1"},
+        {"profile_key": "RESEARCH_DATASET_ALPHA", "profile_name": "Research Dataset Alpha"},
+    )
+    assert entry["profile_key"] == "RESEARCH_DATASET_ALPHA"
+    assert entry["inferred_profile"] is False
+
+
+def test_derive_inventory_category_from_path():
+    assert normalizer.derive_inventory_category("/data/app/com.example/base.apk") == "User"
+    assert normalizer.derive_inventory_category("/system/priv-app/Foo/Foo.apk") == "System"
+    assert normalizer.derive_inventory_category(None) is None

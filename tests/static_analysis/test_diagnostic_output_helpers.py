@@ -90,6 +90,25 @@ def test_db_verification_treats_missing_legacy_run_id_as_bridge_gap_when_canonic
     assert status == "OK (canonical static persistence; legacy run_id bridge absent)"
 
 
+def test_db_verification_canonical_ok_without_legacy_run_id_or_orphan_flag():
+    audit = SimpleNamespace(
+        is_group_scope=False,
+        run_id=None,
+        is_orphan=False,
+        static_run_id=4007,
+    )
+
+    status = db_verification._status_from_audit(
+        audit=audit,
+        missing=(),
+        run_status="COMPLETED",
+        abort_reason=None,
+        abort_signal=None,
+    )
+
+    assert status == "OK (canonical static persistence; legacy run_id bridge absent)"
+
+
 def test_group_diagnostic_warnings_dedupes():
     warnings = [
         ("Linkage", "pkg.alpha", "UNAVAILABLE: no run_map; no db link"),

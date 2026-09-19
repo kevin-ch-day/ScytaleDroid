@@ -138,6 +138,51 @@ def test_replay_package_manifest_repairs_mirror_failed_package(tmp_path: Path, m
     assert any(call[0] == "upsert_source_path" for call in fake_repo.calls)
 
 
+def test_replay_infers_base_when_is_base_omitted(tmp_path: Path, monkeypatch) -> None:
+    file_name = "com.example.app__100__base.apk"
+    artifact_path = tmp_path / "device_apks" / "SERIAL123" / "20260328" / "com.example.app" / file_name
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_bytes(b"apk\n")
+    manifest_path = _write_manifest(
+        tmp_path / "device_apks",
+        local_artifact_path=f"SERIAL123/20260328/com.example.app/{file_name}",
+    )
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    observed = payload["execution"]["observed_artifacts"][0]
+    observed["file_name"] = file_name
+    observed.pop("is_base", None)
+    payload["planning"]["expected_artifacts"][0]["file_name"] = file_name
+    payload["planning"]["expected_artifacts"][0].pop("is_base", None)
+    manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    fake_repo = _FakeRepo()
+    monkeypatch.setattr(replay.common, "resolve_storage_root", lambda: ("test-host", str(tmp_path / "device_apks")))
+
+    outcome = replay.replay_package_manifest(manifest_path, repo_module=fake_repo)
+
+    assert outcome.succeeded is True
+    upsert_calls = [call for call in fake_repo.calls if call[0] == "upsert_apk_record"]
+    assert upsert_calls[0][1][0]["is_split_member"] is False
+
+
+def test_replay_prefers_apk_signer_over_inventory_digest(tmp_path: Path, monkeypatch) -> None:
+    artifact_path = tmp_path / "device_apks" / "SERIAL123" / "20260328" / "com.example.app" / "base.apk"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_bytes(b"apk\n")
+    manifest_path = _write_manifest(
+        tmp_path / "device_apks",
+        local_artifact_path="SERIAL123/20260328/com.example.app/base.apk",
+    )
+    fake_repo = _FakeRepo()
+    monkeypatch.setattr(replay.common, "resolve_storage_root", lambda: ("test-host", str(tmp_path / "device_apks")))
+    monkeypatch.setattr(replay, "extract_apk_cert_sha256", lambda path: "b" * 64)
+
+    outcome = replay.replay_package_manifest(manifest_path, repo_module=fake_repo)
+
+    assert outcome.succeeded is True
+    upsert_calls = [call for call in fake_repo.calls if call[0] == "upsert_apk_record"]
+    assert upsert_calls[0][1][0]["signer_fingerprint"] == "b" * 64
+
+
 def test_replay_package_manifest_skips_non_mirror_failed_package(tmp_path: Path, monkeypatch) -> None:
     artifact_path = tmp_path / "device_apks" / "SERIAL123" / "20260328" / "com.example.app" / "base.apk"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)

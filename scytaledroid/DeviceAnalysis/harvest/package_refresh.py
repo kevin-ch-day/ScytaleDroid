@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from scytaledroid.DeviceAnalysis.identity import is_base_artifact
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .models import ArtifactPlan, ArtifactResult, InventoryRow, PackagePlan
@@ -53,6 +54,7 @@ def replan_package_after_stale_path(
 
 def refresh_inventory_row_from_device(serial: str, inventory: InventoryRow) -> InventoryRow:
     from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
+    from scytaledroid.DeviceAnalysis.inventory.normalizer import derive_inventory_category
     from scytaledroid.DeviceAnalysis.runtime_flags import allow_inventory_fallbacks
 
     allow_fallbacks = allow_inventory_fallbacks()
@@ -95,7 +97,11 @@ def refresh_inventory_row_from_device(serial: str, inventory: InventoryRow) -> I
         app_label = maybe_str(metadata.get("app_label")) or app_label
         installer = maybe_str(metadata.get("installer")) or installer
         version_name = maybe_str(metadata.get("version_name")) or version_name
+    if app_label and app_label.lower() == inventory.package_name.lower():
+        app_label = None
     raw = dict(inventory.raw)
+    primary_path = refreshed_paths[0] if refreshed_paths else None
+    category = inventory.category or derive_inventory_category(primary_path)
     raw.update(
         {
             "package_name": inventory.package_name,
@@ -103,9 +109,10 @@ def refresh_inventory_row_from_device(serial: str, inventory: InventoryRow) -> I
             "installer": installer,
             "version_name": version_name,
             "version_code": version_code,
-            "primary_path": refreshed_paths[0] if refreshed_paths else None,
+            "primary_path": primary_path,
             "apk_paths": list(refreshed_paths),
             "split_count": len(refreshed_paths),
+            "category": category,
             "signer_cert_digest": metadata.get("signer_cert_digest") or raw.get("signer_cert_digest"),
             "signer_set_hash": metadata.get("signer_set_hash") or raw.get("signer_set_hash"),
         }
@@ -115,7 +122,7 @@ def refresh_inventory_row_from_device(serial: str, inventory: InventoryRow) -> I
         package_name=inventory.package_name,
         app_label=maybe_str(raw.get("app_label")),
         installer=maybe_str(raw.get("installer")),
-        category=inventory.category,
+        category=category,
         primary_path=maybe_str(raw.get("primary_path")),
         profile_key=inventory.profile_key,
         profile=inventory.profile,
@@ -154,7 +161,11 @@ def written_artifacts_fit_plan(
         candidate = (
             str(artifact.artifact_label or "").strip() or "base",
             str(artifact.file_name or "").strip(),
-            not bool(artifact.is_base) if artifact.is_base is not None else False,
+            not is_base_artifact(
+                is_base=artifact.is_base,
+                file_name=artifact.file_name,
+                split_label=artifact.artifact_label,
+            ),
         )
         if candidate not in allowed:
             return False

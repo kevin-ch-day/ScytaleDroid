@@ -1458,17 +1458,7 @@ def reconcile_static_session_artifacts() -> None:
 
     print_warning_preview("Failed packages", summary.failed_packages)
     print_warning_preview("Missing session links", summary.missing_session_links)
-    print_warning_preview("Missing compat runs", summary.missing_legacy_runs)
     print_warning_preview("Missing permission posture risk", summary.missing_risk_scores)
-    secondary_compat_gap_count = summary.missing_secondary_compat_mirror_count
-    if secondary_compat_gap_count:
-        print(
-            status_messages.status(
-                "Secondary compat mirror gaps recorded in reconcile audit "
-                f"(total={secondary_compat_gap_count})",
-                level="info",
-            )
-        )
     print_warning_preview("Missing findings summary", summary.missing_findings_summary)
     print_warning_preview("Missing string summary", summary.missing_string_summary)
     print_warning_preview("Missing report packages", summary.missing_report_packages)

@@ -37,7 +37,19 @@ GRANT SELECT ON `android_permission_intel`.`permission_cohort_expectations`
   TO `scytaledroid_pi_reference_reader`;
 GRANT SELECT ON `android_permission_intel`.`android_permission_v1_catalog_release`
   TO `scytaledroid_pi_reference_reader`;
+GRANT SELECT ON `android_permission_intel`.`android_permission_v1_current_permission`
+  TO `scytaledroid_pi_reference_reader`;
 GRANT SELECT ON `android_permission_intel`.`android_permission_v1_scytaledroid_permission`
+  TO `scytaledroid_pi_reference_reader`;
+GRANT SELECT ON `android_permission_intel`.`android_permission_authority_fact`
+  TO `scytaledroid_pi_reference_reader`;
+GRANT SELECT ON `android_permission_intel`.`android_permission_non_permission_fact`
+  TO `scytaledroid_pi_reference_reader`;
+GRANT SELECT ON `android_permission_intel`.`android_permission_token_anomaly_fact`
+  TO `scytaledroid_pi_reference_reader`;
+GRANT SELECT ON `android_permission_intel`.`android_permission_concept`
+  TO `scytaledroid_pi_reference_reader`;
+GRANT SELECT ON `android_permission_intel`.`api_permission_declaration_conflict`
   TO `scytaledroid_pi_reference_reader`;
 
 GRANT INSERT ON `android_permission_intel`.`android_permission_dict_queue`

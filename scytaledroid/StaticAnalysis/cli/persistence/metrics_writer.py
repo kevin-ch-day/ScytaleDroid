@@ -22,6 +22,7 @@ from scytaledroid.StaticAnalysis.risk.permission import (
     permission_risk_grade as _perm_grade,
 )
 from scytaledroid.StaticAnalysis.risk.permission import (
+    collect_catalog_score_signals,
     permission_risk_score_detail as _perm_detail,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -148,6 +149,7 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
     flagged_normals = len(flagged_normals_set)
     noteworthy_normals = len(noteworthy_normals_set)
     special_risk_normals = len(special_risk_normals_set)
+    catalog_signals = collect_catalog_score_signals(profiles_section)
 
     pmap = _prot_map(shorts_only, target_sdk)
     rc, groups, vc, _fw_ds, _vn = _classify(declared_pairs, pmap)
@@ -179,6 +181,9 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
         noteworthy_normals=noteworthy_normals,
         special_risk_normals=special_risk_normals,
         weak_guards=weak_guard_count,
+        background_sensitive=catalog_signals["background_sensitive"],
+        health_sensitive=catalog_signals["health_sensitive"],
+        privileged_declared=catalog_signals["privileged_declared"],
     )
     detail: MutableMapping[str, Any] = dict(raw_detail) if isinstance(raw_detail, Mapping) else {}
     permission_score = float(detail.get("score_3dp", detail.get("score_capped", detail.get("score_raw", 0.0)) or 0.0) or 0.0)

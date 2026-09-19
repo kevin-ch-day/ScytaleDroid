@@ -21,6 +21,7 @@ class PermissionIntelReadiness:
     governance_ok: bool
     governance_detail: str | None
     dictionary_select_ok: bool
+    missing_interpretation_surfaces: tuple[str, ...] = ()
 
 
 def assess_permission_intel_readiness() -> PermissionIntelReadiness:
@@ -36,6 +37,7 @@ def assess_permission_intel_readiness() -> PermissionIntelReadiness:
             governance_ok=False,
             governance_detail="not_configured",
             dictionary_select_ok=False,
+            missing_interpretation_surfaces=(),
         )
 
     resolved_db: str | None = None
@@ -58,6 +60,15 @@ def assess_permission_intel_readiness() -> PermissionIntelReadiness:
             missing.append(table)
             connect_ok = False
 
+    missing_interp: list[str] = []
+    if connect_ok:
+        for table in intel_db.INTERPRETATION_SURFACES:
+            try:
+                if not intel_db.intel_table_exists(table):
+                    missing_interp.append(table)
+            except Exception:
+                missing_interp.append(table)
+
     dict_ok = False
     if connect_ok and not missing:
         dict_ok = bool(intel_db.probe_dictionary_read_access())
@@ -74,6 +85,7 @@ def assess_permission_intel_readiness() -> PermissionIntelReadiness:
         governance_ok=bool(gov_ok),
         governance_detail=gov_detail,
         dictionary_select_ok=dict_ok,
+        missing_interpretation_surfaces=tuple(missing_interp),
     )
 
 
@@ -181,6 +193,22 @@ def render_permission_intel_readiness(*, paper_grade_requested: bool) -> str:
             level="info" if state.dictionary_select_ok else "error",
         )
     )
+    if state.missing_interpretation_surfaces:
+        print(
+            status_messages.status(
+                "Interpretation surfaces missing: "
+                + ", ".join(state.missing_interpretation_surfaces)
+                + " (YAML catalog fallback for detectors; not a paper-grade failure)",
+                level="warn",
+            )
+        )
+    else:
+        print(
+            status_messages.status(
+                "Interpretation surfaces: OK (deployed v1 views + fact tables)",
+                level="info",
+            )
+        )
 
     print(
         status_messages.status(

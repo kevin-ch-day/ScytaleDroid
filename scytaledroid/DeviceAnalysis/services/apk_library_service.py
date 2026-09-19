@@ -23,6 +23,7 @@ from scytaledroid.DeviceAnalysis.harvest.models import (
     PackagePlan,
     PullResult,
 )
+from scytaledroid.DeviceAnalysis.identity import is_base_artifact
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, group_artifacts
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
@@ -538,7 +539,15 @@ def _matching_observed_artifact(planned: Any, observed: list[Any]) -> Mapping[st
     for item in observed:
         if not isinstance(item, dict):
             continue
-        item_role = "base" if bool(item.get("is_base")) else "split"
+        item_role = (
+            "base"
+            if is_base_artifact(
+                is_base=item.get("is_base"),
+                file_name=str(item.get("file_name") or ""),
+                split_label=str(item.get("split_label") or ""),
+            )
+            else "split"
+        )
         item_split = _split_name(str(item.get("split_label") or ""), str(item.get("file_name") or ""), item_role == "split")
         if item_role == wanted_role and item_split == wanted_split:
             return item
@@ -565,7 +574,11 @@ def _plan_from_legacy_receipt(payload: Mapping[str, Any]) -> PackagePlan | None:
         source_path = str(item.get("planned_source_path") or "").strip()
         if not file_name or not source_path:
             continue
-        is_base = item.get("is_base") is True
+        is_base = is_base_artifact(
+            is_base=item.get("is_base"),
+            file_name=file_name,
+            split_label=str(item.get("split_label") or ""),
+        )
         artifacts.append(
             ArtifactPlan(
                 source_path=source_path,

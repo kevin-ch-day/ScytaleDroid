@@ -339,16 +339,19 @@ def _verify_static_link(
     sql = """
         SELECT COUNT(*)
         FROM v_static_handoff_v1
-        WHERE LOWER(static_handoff_hash)=LOWER(%s)
-          AND LOWER(base_apk_sha256)=LOWER(%s)
-          AND LOWER(artifact_set_hash)=LOWER(%s)
-          AND UPPER(COALESCE(run_class,''))='CANONICAL'
-          AND COALESCE(identity_conflict_flag,0)=0
+        WHERE static_handoff_hash = %s
+          AND base_apk_sha256 = %s
+          AND artifact_set_hash = %s
+          AND COALESCE(identity_conflict_flag, 0) = 0
     """
-    args: list[Any] = [static_handoff_hash, base_apk_sha256, artifact_set_hash]
+    args: list[Any] = [
+        str(static_handoff_hash or "").strip().lower(),
+        str(base_apk_sha256 or "").strip().lower(),
+        str(artifact_set_hash or "").strip().lower(),
+    ]
     if package_name_lc:
-        sql += " AND LOWER(package_name_lc)=LOWER(%s)"
-        args.append(package_name_lc)
+        sql += " AND package_name_lc = %s"
+        args.append(str(package_name_lc).strip().lower())
     if version_code is not None:
         sql += " AND version_code=%s"
         args.append(int(version_code))

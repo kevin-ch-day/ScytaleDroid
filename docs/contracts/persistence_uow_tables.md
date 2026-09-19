@@ -17,25 +17,21 @@ Current scientific table set:
 2. `app_versions`
 3. `static_analysis_runs`
 4. `static_analysis_findings`
-5. `findings`
-6. `static_correlation_results`
-7. `static_fileproviders`
-8. `static_provider_acl`
-9. `risk_scores`
-10. `static_permission_risk_vnext`
-11. `static_permission_matrix`
-12. `buckets`
-13. `metrics`
-14. `contributors`
-15. `masvs_control_coverage`
-16. `static_findings_summary`
-17. `static_findings`
-18. `static_string_summary`
-19. `static_string_samples`
-20. `static_string_selected_samples`
-21. `static_string_sample_sets`
-22. `doc_hosts`
-23. `static_finding_evidence_payloads`
+5. `static_correlation_results`
+6. `static_fileproviders`
+7. `static_provider_acl`
+8. `risk_scores`
+9. `static_permission_risk_vnext`
+10. `static_permission_matrix`
+11. `masvs_control_coverage`
+12. `static_findings_summary`
+13. `static_findings`
+14. `static_string_summary`
+15. `static_string_samples`
+16. `static_string_selected_samples`
+17. `static_string_sample_sets`
+18. `doc_hosts`
+19. `static_finding_evidence_payloads`
 
 ## Ledger / Audit Tables (Non-Scientific)
 

@@ -105,3 +105,49 @@ def test_composite_risk_scoring_prefers_permission_band_field() -> None:
     assert assessment.score == 5
     assert assessment.band == "Low"
     assert assessment.factors[0].label == "high-risk permissions"
+
+
+def test_composite_risk_counts_iss_medium_and_health_permissions() -> None:
+    report = SimpleNamespace(
+        manifest_flags=SimpleNamespace(uses_cleartext_traffic=False),
+        permissions=SimpleNamespace(declared=set()),
+    )
+    camera = compute_risk_assessment(
+        permissions=[{"name": "android.permission.CAMERA", "band": "Medium", "weight": 73}],
+        secrets=[],
+        network={},
+        report=report,
+    )
+    assert camera.score == 3
+    health = compute_risk_assessment(
+        permissions=[
+            {"name": "android.permission.health.READ_HEART_RATE", "band": "Low", "weight": 70}
+        ],
+        secrets=[],
+        network={},
+        report=report,
+    )
+    assert health.score == 5
+
+
+def test_composite_risk_secrets_and_permissions_use_noisy_or_not_linear_cap() -> None:
+    report = SimpleNamespace(
+        manifest_flags=SimpleNamespace(uses_cleartext_traffic=False),
+        permissions=SimpleNamespace(declared=set()),
+    )
+    many_high = compute_risk_assessment(
+        permissions=[{"name": f"android.permission.P{i}", "band": "High"} for i in range(8)],
+        secrets=[],
+        network={},
+        report=report,
+    )
+    assert many_high.score < 20
+    assert many_high.score > 5
+    two_p0 = compute_risk_assessment(
+        permissions=[],
+        secrets=[{"severity": "P0"}, {"severity": "P0"}],
+        network={},
+        report=report,
+    )
+    assert two_p0.score < 90
+    assert two_p0.score > 45

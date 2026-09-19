@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
+from scytaledroid.DeviceAnalysis.identity import is_base_artifact, normalize_hex_digest
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
@@ -533,10 +534,24 @@ def _persist_install_set_spine(
     inventory = result.plan.inventory
     members = []
     for ordinal, artifact in enumerate(result.ok):
-        digest = str(artifact.sha256 or "").strip().lower()
-        if len(digest) != 64:
+        digest = normalize_hex_digest(artifact.sha256)
+        if digest is None:
+            emit(
+                "warning",
+                "harvest.install_set.skipped_incomplete_hashes",
+                extra={
+                    "package_name": inventory.package_name,
+                    "member_count": len(result.ok),
+                    "invalid_ordinal": ordinal,
+                    "file_name": artifact.file_name,
+                },
+            )
             return
-        is_base = bool(artifact.is_base)
+        is_base = is_base_artifact(
+            is_base=artifact.is_base,
+            file_name=artifact.file_name,
+            split_label=artifact.artifact_label,
+        )
         split_name = artifact.artifact_label or ("base" if is_base else artifact.file_name)
         role = "base" if is_base else "split"
         members.append(
@@ -552,7 +567,17 @@ def _persist_install_set_spine(
                 ordinal=ordinal,
             )
         )
-    if len([member for member in members if member.role == "base"]) != 1:
+    base_count = len([member for member in members if member.role == "base"])
+    if base_count != 1:
+        emit(
+            "warning",
+            "harvest.install_set.skipped_no_unique_base",
+            extra={
+                "package_name": inventory.package_name,
+                "member_count": len(members),
+                "base_count": base_count,
+            },
+        )
         return
 
     try:
@@ -572,6 +597,14 @@ def _persist_install_set_spine(
         )
         apk_set_id = db_install_sets.upsert_install_set(record)
         if apk_set_id is None:
+            emit(
+                "warning",
+                "harvest.install_set.upsert_returned_none",
+                extra={
+                    "package_name": inventory.package_name,
+                    "member_count": len(members),
+                },
+            )
             return
         stats["db_harvest_sessions"] += 1
         stats["db_apk_sets"] += 1

@@ -10,6 +10,8 @@ from types import ModuleType
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.apk_signing import extract_apk_cert_sha256
+from scytaledroid.DeviceAnalysis.identity import is_base_artifact, normalize_hex_digest
 
 from ..services import artifact_store
 from . import common
@@ -268,21 +270,24 @@ def _replay_artifact(
             file_size = absolute_path.stat().st_size
 
     try:
-        signer_fingerprint = str(
-            package.get("signer_cert_digest")
-            or (
-                inventory.get("extras", {}).get("signer_cert_digest")
-                if isinstance(inventory.get("extras"), dict)
-                else ""
-            )
-            or ""
-        ).strip() or None
+        extras = inventory.get("extras") if isinstance(inventory.get("extras"), dict) else {}
+        signer_fingerprint = extract_apk_cert_sha256(absolute_path) or normalize_hex_digest(
+            package.get("signer_cert_digest") or extras.get("signer_cert_digest")
+        )
+        category = str(inventory.get("category") or "").strip().lower()
+        primary_path = str(inventory.get("primary_path") or extras.get("primary_path") or "").strip()
+        is_system = category != "user" and not str(primary_path).startswith("/data/")
+        is_base = is_base_artifact(
+            is_base=artifact.get("is_base"),
+            file_name=file_name,
+            split_label=str(artifact.get("split_label") or ""),
+        )
         record = repo.ApkRecord(
             package_name=package_name,
             app_id=app_id,
             file_name=file_name,
             file_size=file_size,
-            is_system=str(inventory.get("category") or "").strip().lower() != "user",
+            is_system=is_system,
             installer=str(inventory.get("installer") or "").strip() or None,
             version_name=str(package.get("version_name") or "").strip() or None,
             version_code=str(package.get("version_code") or "").strip() or None,
@@ -290,7 +295,7 @@ def _replay_artifact(
             signer_fingerprint=signer_fingerprint,
             device_serial=str(package.get("device_serial") or "").strip() or None,
             harvested_at=str(artifact.get("pulled_at") or "").strip() or None,
-            is_split_member=not bool(artifact.get("is_base")),
+            is_split_member=not is_base,
             split_group_id=group_id,
         )
         apk_id = repo.upsert_apk_record(

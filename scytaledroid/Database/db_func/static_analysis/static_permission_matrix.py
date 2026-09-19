@@ -6,19 +6,26 @@ from collections.abc import Iterable, Mapping
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from ...db_core import run_sql
+from ...db_core import run_sql, run_sql_many
 from ...db_queries.static_analysis import static_permission_matrix as queries
+
+_MATRIX_TABLE_READY = False
 
 
 def ensure_table() -> bool:
     """Verify ``static_permission_matrix`` exists."""
+    global _MATRIX_TABLE_READY
+    if _MATRIX_TABLE_READY:
+        return True
     ok = table_exists()
     if not ok:
         log.warning(
             "static_permission_matrix missing; apply migrations.",
             category="database",
         )
-    return ok
+        return False
+    _MATRIX_TABLE_READY = True
+    return True
 
 
 def table_exists() -> bool:
@@ -33,11 +40,11 @@ def table_exists() -> bool:
 def replace_for_run(run_id: int, rows: Iterable[Mapping[str, object]]) -> int:
     """Replace matrix entries for ``run_id`` with ``rows``."""
     run_sql(queries.DELETE_FOR_RUN, (run_id,))
-    count = 0
-    for row in rows:
-        run_sql(queries.INSERT_ROWS, row)
-        count += 1
-    return count
+    payloads = [tuple(row.get(key) for key in queries.INSERT_ROW_KEYS) for row in rows]
+    if not payloads:
+        return 0
+    run_sql_many(queries.INSERT_ROWS_MANY, payloads)
+    return len(payloads)
 
 
 __all__ = ["ensure_table", "table_exists", "replace_for_run"]

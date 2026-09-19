@@ -298,7 +298,7 @@ def _status_from_audit(
             else "ERROR (missing " + ", ".join(sorted(missing)) + ")"
         )
     elif audit.run_id is None:
-        if audit.is_orphan and audit.static_run_id:
+        if audit.static_run_id:
             status = "OK (canonical static persistence; legacy run_id bridge absent)"
         else:
             status = "SKIPPED (run_id missing)"
@@ -901,20 +901,6 @@ def _render_persistence_footer(
         status_text = db_verification_status or "SKIPPED"
         prefix = f"static_run_id={audit_static_run_id} " if audit_static_run_id is not None else ""
         print(f"  {'db_verification'.ljust(width)} : {status_text} {prefix}".rstrip())
-
-    high_downgraded = 0
-    if run_ids:
-        placeholders = ",".join(["%s"] * len(run_ids))
-        high_downgraded = _scalar_count(
-            (
-                f"SELECT COALESCE(SUM(value_num),0) FROM metrics "
-                f"WHERE feature_key='findings.high_downgraded' AND run_id IN ({placeholders})"
-            ),
-            tuple(run_ids),
-        )
-
-    if high_downgraded:
-        print(f"  {'metrics.high_downgraded'.ljust(width)} : {high_downgraded}")
 
 
 __all__ = [

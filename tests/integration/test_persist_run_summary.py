@@ -216,8 +216,6 @@ def test_persist_run_summary_populates_canonical_tables():
     assert outcome.success
     run_id = outcome.run_id
 
-    assert _scalar("SELECT COUNT(*) FROM runs WHERE session_stamp=%s", (session_stamp,)) == 1
-    assert _scalar("SELECT COUNT(*) FROM findings WHERE run_id=%s", (run_id,)) == outcome.persisted_findings
     assert _scalar("SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp=%s", (session_stamp,)) == 1
     assert _scalar(
         """
@@ -238,9 +236,6 @@ def test_persist_run_summary_populates_canonical_tables():
         """,
         (session_stamp,),
     ) == outcome.string_samples_persisted
-    assert _scalar("SELECT COUNT(*) FROM buckets WHERE run_id=%s", (run_id,)) > 0
-    assert _scalar("SELECT COUNT(*) FROM metrics WHERE run_id=%s", (run_id,)) > 0
-    assert _scalar("SELECT COUNT(*) FROM contributors WHERE run_id=%s", (run_id,)) >= 0
     assert _scalar("SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key=%s", (f"perm-audit:app:{session_stamp}",)) >= 0
     assert _scalar("SELECT COUNT(*) FROM permission_audit_apps", ()) >= 0
 

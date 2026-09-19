@@ -12,6 +12,8 @@ from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 _MATRIX_ROWS = [
     ("Location", ["ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"]),
     ("Camera & Microphone", ["CAMERA", "RECORD_AUDIO"]),
+    ("Background capture", ["BACKGROUND_CAMERA", "RECORD_BACKGROUND_AUDIO"]),
+    ("Health", ["BODY_SENSORS", "HEALTH_CONNECT_DATA", "READ_HEALTH_DATA_IN_BACKGROUND"]),
     ("Overlay & Notifications", ["SYSTEM_ALERT_WINDOW", "POST_NOTIFICATIONS"]),
     ("Contacts & Accounts", ["READ_CONTACTS", "GET_ACCOUNTS"]),
     ("Phone & SMS", ["READ_CALL_LOG", "READ_PHONE_STATE", "SEND_SMS"]),

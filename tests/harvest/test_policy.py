@@ -31,6 +31,19 @@ def _row(
     )
 
 
+def test_user_data_path_is_not_system_when_category_missing() -> None:
+    from scytaledroid.DeviceAnalysis.harvest.common import is_system_package
+
+    user = _row("com.example.app", "Example", primary_path="/data/app/com.example.app/base.apk")
+    system = _row(
+        "com.android.egg",
+        "Easter Egg",
+        primary_path="/system/app/EasterEgg/EasterEgg.apk",
+    )
+    assert is_system_package(user) is False
+    assert is_system_package(system) is True
+
+
 def test_singleton_system_apk_is_planned_as_base():
     row = _row(
         "com.android.egg",
@@ -73,6 +86,32 @@ def test_split_install_keeps_named_base_and_splits():
     assert [(a.artifact, a.is_split_member) for a in artifacts] == [
         ("base", False),
         ("split_config.en", True),
+    ]
+
+
+def test_unnamed_system_apk_pair_uses_first_path_as_base():
+    row = InventoryRow(
+        raw={},
+        package_name="com.android.egg",
+        app_label="Easter Egg",
+        installer=None,
+        category="System",
+        primary_path="/system/app/EasterEgg/EasterEgg.apk",
+        profile_key=None,
+        profile=None,
+        version_name="1.0",
+        version_code="12",
+        apk_paths=[
+            "/system/app/EasterEgg/EasterEgg.apk",
+            "/system/app/EasterEgg/EasterEggOverlay.apk",
+        ],
+        split_count=2,
+    )
+    plan = planner.build_harvest_plan([row], include_system_partitions=True)
+    artifacts = plan.packages[0].artifacts
+    assert [(a.artifact, a.is_split_member) for a in artifacts] == [
+        ("base", False),
+        ("EasterEggOverlay", True),
     ]
 
 

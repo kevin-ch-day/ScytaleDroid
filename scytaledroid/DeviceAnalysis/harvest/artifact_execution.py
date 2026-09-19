@@ -8,6 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
+from scytaledroid.DeviceAnalysis.apk_label import extract_apk_application_label
+from scytaledroid.DeviceAnalysis.apk_signing import extract_apk_cert_sha256
+from scytaledroid.DeviceAnalysis.identity import is_base_artifact, normalize_hex_digest
+
 from .models import ArtifactError, ArtifactPlan, ArtifactResult, PackagePlan
 
 EmitFn = Callable[[str, str, Mapping[str, object | None], str | None], None]
@@ -27,6 +31,14 @@ def confined_harvest_dest(package_dir: Path, file_name: str) -> Path | None:
     if dest == package_root or not dest.is_relative_to(package_root):
         return None
     return dest
+
+
+def _planned_artifact_is_base(artifact: ArtifactPlan, file_name: str | None = None) -> bool:
+    return is_base_artifact(
+        is_base=not artifact.is_split_member,
+        file_name=file_name or artifact.file_name,
+        split_label=artifact.artifact,
+    )
 
 
 @dataclass(frozen=True)
@@ -141,7 +153,7 @@ def pull_and_record(
             file_size=dest_path.stat().st_size if dest_path.exists() else None,
             pulled_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             artifact_label=request.artifact.artifact,
-            is_base=not request.artifact.is_split_member,
+            is_base=_planned_artifact_is_base(request.artifact, dest_path.name),
             observed_source_path=request.artifact.source_path,
             mirror_failure_reasons=mirror_failure_reasons,
             canonical_store_path=canonical_store_path,
@@ -228,6 +240,17 @@ def _materialize_canonical_copy(
     return canonical_store_path, canonical_abs
 
 
+def _resolve_signer_fingerprint(
+    request: ArtifactExecutionRequest,
+    deps: ArtifactExecutionDeps,
+    dest_path: Path,
+) -> str | None:
+    apk_digest = extract_apk_cert_sha256(dest_path)
+    if apk_digest:
+        return apk_digest
+    return normalize_hex_digest(deps.inventory_signer_fingerprint(request.plan.inventory))
+
+
 def _persist_db_mirror(
     *,
     request: ArtifactExecutionRequest,
@@ -252,10 +275,10 @@ def _persist_db_mirror(
         md5=hashes["md5"],
         sha1=hashes["sha1"],
         sha256=hashes["sha256"],
-        signer_fingerprint=deps.inventory_signer_fingerprint(request.plan.inventory),
+        signer_fingerprint=_resolve_signer_fingerprint(request, deps, dest_path),
         device_serial=request.serial,
         harvested_at=datetime.now(UTC),
-        is_split_member=request.artifact.is_split_member,
+        is_split_member=not _planned_artifact_is_base(request.artifact, dest_path.name),
         split_group_id=request.group_id,
     )
     try:
@@ -291,7 +314,36 @@ def _persist_db_mirror(
         _persist_artifact_path(request, deps, apk_id)
     if apk_id and request.artifact.source_path:
         _persist_source_path(request, deps, apk_id, mirror_failure_reasons)
+    if _planned_artifact_is_base(request.artifact, dest_path.name):
+        _maybe_fill_display_name_from_apk(request, deps, dest_path)
     return apk_id, mirror_failure_reasons
+
+
+def _maybe_fill_display_name_from_apk(
+    request: ArtifactExecutionRequest,
+    deps: ArtifactExecutionDeps,
+    dest_path: Path,
+) -> None:
+    label = extract_apk_application_label(
+        dest_path,
+        package_name=request.plan.inventory.package_name,
+    )
+    if not label:
+        return
+    try:
+        request.db_repo.ensure_app_definition(
+            request.plan.inventory.package_name,
+            label,
+            context={
+                **request.base_context,
+                "package_name": request.plan.inventory.package_name,
+            },
+        )
+    except Exception as exc:
+        deps.log_warning(
+            f"Failed to fill display_name from APK for {request.plan.inventory.package_name}: {exc}",
+            "database",
+        )
 
 
 def _persist_artifact_path(
@@ -373,7 +425,7 @@ def _write_sidecar(
 ) -> None:
     artifact_payload = {
         "source_path": request.artifact.source_path,
-        "is_split_member": request.artifact.is_split_member,
+        "is_split_member": not _planned_artifact_is_base(request.artifact, dest_path.name),
         "split_group_id": request.group_id,
     }
     inventory_meta = deps.inventory_payload(request.plan.inventory)

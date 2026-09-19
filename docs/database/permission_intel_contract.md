@@ -63,8 +63,18 @@ Current reads include:
 
 - AOSP permission dictionary and protection metadata
 - OEM/vendor dictionaries and prefix rules
+- accepted v1 catalog views (`android_permission_v1_catalog_release`,
+  `android_permission_v1_current_permission`,
+  `android_permission_v1_scytaledroid_permission`) used as the static analysis
+  catalog when Permission Intel is reachable
+- current-interpretation fact tables (authority / non-permission / token
+  anomaly / concept / declaration conflicts)
 - governance snapshot readiness signals
 - signal catalog/mapping data used by static scoring and reporting
+
+`config/framework_permissions.yaml` is the offline fallback when those v1 views
+are unset or unreadable. The undeployed `android_permission_v1_1_*` candidate
+is not a Scytale read surface.
 
 ## Observation Writes
 

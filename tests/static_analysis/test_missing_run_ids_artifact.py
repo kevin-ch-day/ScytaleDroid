@@ -37,17 +37,7 @@ def _stub_audit_summary_queries(monkeypatch) -> None:
             return [("com.ok",)]
         if "SELECT package_name FROM static_string_summary" in sql:
             return [("com.ok",)]
-        if "SELECT package FROM runs" in sql and "session_stamp=%s" in sql:
-            return [("com.ok",)]
         if "SELECT package_name FROM risk_scores" in sql:
-            return [("com.ok",)]
-        if "SELECT DISTINCT lr.package FROM findings" in sql:
-            return [("com.ok",)]
-        if "SELECT DISTINCT lr.package FROM metrics" in sql:
-            return [("com.ok",)]
-        if "SELECT DISTINCT lr.package FROM buckets" in sql:
-            return [("com.ok",)]
-        if "SELECT DISTINCT lr.package FROM contributors" in sql:
             return [("com.ok",)]
         if "COUNT(*) FROM static_session_run_links" in sql:
             return (1,)

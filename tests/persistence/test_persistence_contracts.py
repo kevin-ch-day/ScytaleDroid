@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from scytaledroid.StaticAnalysis.cli.persistence import dep_view
 from scytaledroid.StaticAnalysis.cli.persistence.contracts import (
     AUTHORITATIVE_RUN_STATES,
@@ -21,6 +23,10 @@ def test_status_vocabulary_is_locked():
 
 def test_scientific_tables_do_not_overlap_ledger():
     assert SCIENTIFIC_UOW_TABLES.isdisjoint(LEDGER_TABLES)
+
+
+def test_scientific_tables_exclude_legacy_five():
+    assert SCIENTIFIC_UOW_TABLES.isdisjoint({"runs", "findings", "metrics", "buckets", "contributors"})
 
 
 def test_minimum_scientific_tables_present():
@@ -50,3 +56,14 @@ def test_build_dep_view_sql_uses_table_presence(monkeypatch) -> None:
     assert "FROM static_analysis_runs sar" in sql
     assert calls and calls[0] == list(dep_view._DEP_OPTIONAL_SOURCES)
     assert "FROM static_permission_matrix" in sql
+    assert "FROM metrics" not in sql
+
+
+def test_bridge_direct_counts_do_not_query_legacy_five() -> None:
+    from scytaledroid.StaticAnalysis.cli.flows import run_persistence_queries as rpq
+
+    source = Path(rpq.__file__).read_text(encoding="utf-8")
+    assert "FROM findings" not in source
+    assert "FROM metrics" not in source
+    assert "FROM buckets" not in source
+    assert "FROM contributors" not in source

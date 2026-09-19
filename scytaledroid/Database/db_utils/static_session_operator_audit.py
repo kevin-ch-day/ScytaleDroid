@@ -423,41 +423,13 @@ def audit_static_session_operator(
 
     if not runs_mirror_present:
         legacy_rows.append(("runs (legacy mirror)", None, "SKIP (table absent)"))
-        legacy_rows.append(("metrics (legacy mirror)", None, "SKIP (requires runs mirror)"))
-        legacy_rows.append(("buckets (legacy mirror)", None, "SKIP (requires runs mirror)"))
+        legacy_rows.append(("metrics (legacy mirror)", None, "SKIP (not a persist contract)"))
+        legacy_rows.append(("buckets (legacy mirror)", None, "SKIP (not a persist contract)"))
     else:
         lr, st = legacy_runs_count_by_session_stamp(run_sql, session)
         legacy_rows.append(("runs (legacy mirror)", lr, st))
-
-        metrics_mirror_present = (not legacy_mirror_presence) or legacy_mirror_presence.get("metrics", True)
-        if not metrics_mirror_present:
-            legacy_rows.append(("metrics (legacy mirror)", None, "SKIP (table absent)"))
-        else:
-            lm, st = _safe_scalar(
-                run_sql,
-                """
-                SELECT COUNT(*) FROM metrics m
-                INNER JOIN runs r ON r.run_id = m.run_id
-                WHERE r.session_stamp=%s
-                """,
-                (session,),
-            )
-            legacy_rows.append(("metrics (legacy mirror)", lm, st))
-
-        buckets_mirror_present = (not legacy_mirror_presence) or legacy_mirror_presence.get("buckets", True)
-        if not buckets_mirror_present:
-            legacy_rows.append(("buckets (legacy mirror)", None, "SKIP (table absent)"))
-        else:
-            lb, st = _safe_scalar(
-                run_sql,
-                """
-                SELECT COUNT(*) FROM buckets b
-                INNER JOIN runs r ON r.run_id = b.run_id
-                WHERE r.session_stamp=%s
-                """,
-                (session,),
-            )
-            legacy_rows.append(("buckets (legacy mirror)", lb, st))
+        legacy_rows.append(("metrics (legacy mirror)", None, "SKIP (not a persist contract)"))
+        legacy_rows.append(("buckets (legacy mirror)", None, "SKIP (not a persist contract)"))
 
     findings_mirror_present = (not legacy_mirror_presence) or legacy_mirror_presence.get("findings", True)
     if not findings_mirror_present:

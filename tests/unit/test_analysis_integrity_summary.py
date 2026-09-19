@@ -83,8 +83,6 @@ def test_fetch_analysis_integrity_summary_includes_dynamic_retention_counts(monk
             return 4
         if "EXISTS (\n                SELECT 1 FROM static_permission_matrix" in sql:
             return 25
-        if "LEFT JOIN runs r" in sql and "r.run_id IS NULL" in sql:
-            return 3
         if "LEFT JOIN risk_scores rs" in sql and "rs.id IS NULL" in sql:
             return 4
         if "LEFT JOIN static_findings_summary sfs ON sfs.static_run_id = sar.id" in sql:
@@ -123,7 +121,7 @@ def test_fetch_analysis_integrity_summary_includes_dynamic_retention_counts(monk
     assert summary.duplicate_app_version_code_groups == 2
     assert summary.duplicate_app_version_rows == 4
     assert summary.interrupted_permission_partial_runs == 25
-    assert summary.completed_static_runs_missing_legacy_runs == 3
+    assert summary.completed_static_runs_missing_legacy_runs == 0
     assert summary.completed_static_runs_missing_risk_scores == 4
     assert summary.completed_static_runs_missing_findings_summary == 5
     assert summary.risk_surface_rows_with_both_scores == 118

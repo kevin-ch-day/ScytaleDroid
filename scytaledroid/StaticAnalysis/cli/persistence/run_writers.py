@@ -241,11 +241,11 @@ def resolve_apk_set_id_for_artifact_set_hash(
     value = str(artifact_set_hash or "").strip().lower()
     if not value:
         return None
-    clauses = ["LOWER(TRIM(artifact_set_hash)) = %s"]
+    clauses = ["artifact_set_hash = %s"]
     params: list[object] = [value]
     version = str(artifact_set_hash_version or "").strip()
     if version:
-        clauses.append("LOWER(TRIM(artifact_set_hash_version)) = %s")
+        clauses.append("artifact_set_hash_version = %s")
         params.append(version.lower())
     try:
         row = core_q.run_sql(
@@ -279,6 +279,7 @@ def _ensure_app_version(
 ) -> int | None:
     """Fetch or create an app_version row for static_analysis_runs."""
     try:
+        from scytaledroid.Database.db_func.apps.app_labels import usable_display_name
         from scytaledroid.Database.db_utils.package_utils import normalize_package_name
         from scytaledroid.Database.db_utils.publisher_rules import apply_publisher_mapping
         from scytaledroid.Database.db_utils.reference_seed import ensure_default_reference_rows
@@ -289,6 +290,7 @@ def _ensure_app_version(
         cleaned_package = normalize_package_name(package_for_run, context="database")
         if not cleaned_package:
             return None
+        incoming_name = usable_display_name(cleaned_package, display_name)
         app_id = None
         row = core_q.run_sql(
             "SELECT id, display_name FROM apps WHERE package_name=%s",
@@ -297,21 +299,16 @@ def _ensure_app_version(
         )
         if row and row[0]:
             app_id = int(row[0])
-            existing_name = row[1] if len(row) > 1 else None
-            if (
-                isinstance(display_name, str)
-                and display_name.strip()
-                and display_name != package_for_run
-                and (existing_name is None or existing_name == "" or existing_name == package_for_run)
-            ):
+            existing_name = usable_display_name(cleaned_package, row[1] if len(row) > 1 else None)
+            if incoming_name and not existing_name:
                 core_q.run_sql(
                     "UPDATE apps SET display_name=%s WHERE id=%s",
-                    (display_name, app_id),
+                    (incoming_name, app_id),
                 )
         else:
             app_id = core_q.run_sql(
                 "INSERT INTO apps (package_name, display_name, profile_key, publisher_key) VALUES (%s,%s,%s,%s)",
-                (cleaned_package, display_name, "UNCLASSIFIED", "UNKNOWN"),
+                (cleaned_package, incoming_name, "UNCLASSIFIED", "UNKNOWN"),
                 return_lastrowid=True,
             )
             app_id = int(app_id) if app_id else None

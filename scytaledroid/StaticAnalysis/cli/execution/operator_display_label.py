@@ -48,8 +48,11 @@ def resolve_operator_app_label(
     meta_lbl = str(raw).strip() if raw is not None else ""
     if meta_lbl and meta_lbl.lower() != key:
         return meta_lbl
-    db_lbl = str(db_display_names.get(key) or "").strip()
-    if db_lbl:
+    db_raw = None
+    if isinstance(db_display_names, Mapping):
+        db_raw = db_display_names.get(key) or db_display_names.get(str(package_name).strip())
+    db_lbl = str(db_raw).strip() if db_raw is not None else ""
+    if db_lbl and db_lbl.lower() != key:
         return db_lbl
     if meta_lbl:
         return meta_lbl

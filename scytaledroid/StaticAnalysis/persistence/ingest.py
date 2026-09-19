@@ -163,6 +163,7 @@ def _build_finding_context(
 
 def _get_or_create_app(package_name: str, display_name: str | None = None) -> int | None:
     try:
+        from scytaledroid.Database.db_func.apps.app_labels import usable_display_name
         from scytaledroid.Database.db_utils.package_utils import normalize_package_name
         from scytaledroid.Database.db_utils.publisher_rules import apply_publisher_mapping
         from scytaledroid.Database.db_utils.reference_seed import ensure_default_reference_rows
@@ -170,19 +171,27 @@ def _get_or_create_app(package_name: str, display_name: str | None = None) -> in
         cleaned_package = normalize_package_name(package_name, context="database")
         if not cleaned_package:
             return None
+        incoming_name = usable_display_name(cleaned_package, display_name)
         row = core_q.run_sql(
-            "SELECT id FROM apps WHERE package_name = %s",
+            "SELECT id, display_name FROM apps WHERE package_name = %s",
             (cleaned_package,),
             fetch="one",
         )
         if row and row[0]:
-            return int(row[0])
+            app_id = int(row[0])
+            existing_name = usable_display_name(cleaned_package, row[1] if len(row) > 1 else None)
+            if incoming_name and not existing_name:
+                core_q.run_sql(
+                    "UPDATE apps SET display_name=%s WHERE id=%s",
+                    (incoming_name, app_id),
+                )
+            return app_id
         # Defensive: some deployments enforce FK constraints from apps.profile_key/publisher_key.
         # Ensure the default reference rows exist before inserting into apps.
         ensure_default_reference_rows()
         new_id = core_q.run_sql(
             "INSERT INTO apps (package_name, display_name, profile_key, publisher_key) VALUES (%s, %s, %s, %s)",
-            (cleaned_package, display_name, "UNCLASSIFIED", "UNKNOWN"),
+            (cleaned_package, incoming_name, "UNCLASSIFIED", "UNKNOWN"),
             return_lastrowid=True,
         )
         apply_publisher_mapping([cleaned_package])
@@ -315,7 +324,7 @@ def ingest_baseline_payload(payload: Mapping[str, object]) -> bool:
         if not package:
             _warn("missing package name in payload")
             return False
-        display_name = first_text(app.get("label"), app.get("app_label")) or package
+        display_name = first_text(app.get("label"), app.get("app_label"))
         app_id = _get_or_create_app(package, display_name)
         if not app_id:
             _warn("failed to upsert app row")

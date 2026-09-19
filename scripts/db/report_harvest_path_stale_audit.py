@@ -30,6 +30,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scytaledroid.DeviceAnalysis.harvest import stale_replan
+from scytaledroid.DeviceAnalysis.identity import is_base_artifact
 
 OUTCOME_CATEGORIES = stale_replan.STALE_REPLAN_OUTCOMES
 REPLAN_FAILED_OUTCOMES = stale_replan.STALE_REPLAN_FAILURE_OUTCOMES
@@ -291,7 +292,11 @@ def _planned_base_path(payload: Mapping[str, Any]) -> str | None:
         entries = planning.get("expected_artifacts")
         if isinstance(entries, Sequence):
             for entry in entries:
-                if isinstance(entry, Mapping) and bool(entry.get("is_base")):
+                if isinstance(entry, Mapping) and is_base_artifact(
+                    is_base=entry.get("is_base"),
+                    file_name=str(entry.get("file_name") or ""),
+                    split_label=str(entry.get("split_label") or ""),
+                ):
                     return _norm_text_or_none(entry.get("planned_source_path"))
             for entry in entries:
                 if isinstance(entry, Mapping):

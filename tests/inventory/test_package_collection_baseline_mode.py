@@ -293,7 +293,7 @@ def test_collect_inventory_baseline_mode_uses_bulk_metadata_and_skips_pm_dump_fo
     assert "signer_set_hash" not in by_package["com.example.pkg0"]
     assert by_package["com.example.pkg1"]["version_name"] == "1.0"
     assert by_package["com.example.pkg1"]["first_install"] == "2026-05-08 16:33:35"
-    assert by_package["com.example.pkg1"]["app_label"] == "com.example.pkg1"
+    assert by_package["com.example.pkg1"]["app_label"] is None
     assert by_package["com.example.pkg1"]["path_fidelity"] == "dumpsys_reconstructed"
     assert by_package["com.example.pkg1"]["apk_paths"] == ["/system/app/com.example.pkg1/com.example.pkg1.apk"]
     assert "signer_set_hash" not in by_package["com.example.pkg1"]

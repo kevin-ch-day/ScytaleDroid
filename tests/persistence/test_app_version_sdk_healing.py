@@ -122,6 +122,53 @@ def test_run_writers_ensure_app_version_reuses_existing_version_code_row(monkeyp
     assert version_id == 88
 
 
+def test_run_writers_replaces_package_equal_display_name(monkeypatch) -> None:
+    from scytaledroid.StaticAnalysis.cli.persistence import run_writers
+
+    calls: list[tuple[str, tuple[object, ...] | None]] = []
+
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.package_utils.normalize_package_name",
+        lambda value, **_kwargs: value.lower(),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.reference_seed.ensure_default_reference_rows",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.publisher_rules.apply_publisher_mapping",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def fake_run_sql(sql, params=None, fetch=None, **kwargs):
+        text = " ".join(str(sql).split()).lower()
+        calls.append((text, params))
+        if "select id, display_name from apps" in text:
+            return (10, "Com.Example.App")
+        if "update apps set display_name" in text:
+            return None
+        if "select id, min_sdk, target_sdk from app_versions" in text:
+            return (99, 24, 35)
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+    monkeypatch.setattr(run_writers.core_q, "run_sql", fake_run_sql)
+
+    version_id = run_writers._ensure_app_version(
+        package_for_run="com.example.app",
+        display_name="Example",
+        version_name="1.0",
+        version_code=1,
+        min_sdk=24,
+        target_sdk=35,
+    )
+
+    assert version_id == 99
+    assert any(
+        sql.startswith("update apps set display_name") and params == ("Example", 10)
+        for sql, params in calls
+    )
+
+
 def test_ingest_get_or_create_version_reuses_existing_version_code_row(monkeypatch):
     from scytaledroid.StaticAnalysis.persistence import ingest
 

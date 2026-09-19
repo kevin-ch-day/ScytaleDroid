@@ -73,11 +73,53 @@ def test_hydrate_missing_rows_includes_version_code(monkeypatch):
     assert row.package_name == pkg
     assert row.version_code == "123"
     assert row.version_name == "1.2.3"
+    assert row.category == "User"
+    assert row.app_label == "Example"
+    assert row.profile_key is None
 
 
 def test_estimated_files_counts_splits():
     rows = [_row("com.example", split=3)]
     assert scope_context.estimated_files(rows) == 3
+
+
+def test_build_inventory_rows_does_not_keep_package_equal_snapshot_label(monkeypatch) -> None:
+    monkeypatch.setattr(
+        scope_context,
+        "load_app_names",
+        lambda names: {"com.example.app": "Example"},
+    )
+    rows = scope_context.build_inventory_rows(
+        [
+            {
+                "package_name": "com.example.app",
+                "app_label": "com.example.app",
+                "category": "User",
+                "primary_path": "/data/app/com.example.app/base.apk",
+                "apk_paths": ["/data/app/com.example.app/base.apk"],
+                "split_count": 1,
+            }
+        ]
+    )
+    assert rows[0].app_label == "Example"
+    assert rows[0].category == "User"
+
+
+def test_build_inventory_rows_applies_social_heuristic_for_unclassified() -> None:
+    rows = scope_context.build_inventory_rows(
+        [
+            {
+                "package_name": "com.facebook.lite",
+                "app_label": "Facebook Lite",
+                "profile_key": "UNCLASSIFIED",
+                "profile_name": "Unclassified",
+                "primary_path": "/data/app/com.facebook.lite/base.apk",
+                "apk_paths": ["/data/app/com.facebook.lite/base.apk"],
+                "split_count": 1,
+            }
+        ]
+    )
+    assert rows[0].profile_key == "SOCIAL"
 
 
 def test_sample_names_limits_length():

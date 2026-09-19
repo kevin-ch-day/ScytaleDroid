@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from scytaledroid.StaticAnalysis.risk.permission import (
+    collect_catalog_score_signals,
     permission_risk_grade,
     permission_risk_score_detail,
 )
@@ -427,6 +428,7 @@ def render_permission_postcard(
     flagged_normals = len(flagged_normals_set)
     noteworthy_normals = len(noteworthy_normals_set)
     special_risk_normals = len(special_risk_normals_set)
+    catalog_signals = collect_catalog_score_signals(profiles_section)
 
     detail = dict(
         permission_risk_score_detail(
@@ -441,6 +443,9 @@ def render_permission_postcard(
             noteworthy_normals=noteworthy_normals,
             special_risk_normals=special_risk_normals,
             weak_guards=weak_guard_count,
+            background_sensitive=catalog_signals["background_sensitive"],
+            health_sensitive=catalog_signals["health_sensitive"],
+            privileged_declared=catalog_signals["privileged_declared"],
         )
     )
     score = float(detail.get("score_3dp", detail.get("score_capped", 0.0)))

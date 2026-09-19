@@ -103,7 +103,6 @@ def test_fetch_latest_run_prefers_canonical_static_runs() -> None:
         seen.append(query)
         return {
             "static_run_id": 557,
-            "legacy_run_id": 564,
             "package_name": "org.thoughtcrime.securesms",
             "version_name": "8.6.2",
             "version_code": 168201,
@@ -116,9 +115,10 @@ def test_fetch_latest_run_prefers_canonical_static_runs() -> None:
     row = queries.fetch_latest_run(fake_run_sql)
     assert row is not None
     assert row["static_run_id"] == 557
-    assert row["legacy_run_id"] == 564
+    assert "legacy_run_id" not in row
     assert row["package_name"] == "org.thoughtcrime.securesms"
     assert "FROM static_analysis_runs sar" in seen[0]
+    assert "FROM runs" not in seen[0]
 
 
 def test_fetch_latest_session_prefers_canonical_static_runs() -> None:

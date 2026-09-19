@@ -200,17 +200,7 @@ def test_refresh_existing_persistence_audit_payload_direct_mode_updates_rollups_
             return [("pkg.alpha",), ("pkg.beta",)]
         if "SELECT package_name FROM static_string_summary" in sql:
             return [("pkg.alpha",), ("pkg.beta",)]
-        if "SELECT package FROM runs" in sql and "session_stamp=%s" in sql:
-            return []
         if "SELECT package_name FROM risk_scores" in sql:
-            return []
-        if "SELECT DISTINCT lr.package FROM findings" in sql:
-            return []
-        if "SELECT DISTINCT lr.package FROM metrics" in sql:
-            return []
-        if "SELECT DISTINCT lr.package FROM buckets" in sql:
-            return []
-        if "SELECT DISTINCT lr.package FROM contributors" in sql:
             return []
         if "COUNT(*) FROM static_session_run_links" in sql:
             return [(2,)]

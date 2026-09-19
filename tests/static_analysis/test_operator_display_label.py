@@ -45,3 +45,9 @@ def test_resolve_operator_app_label_curated_db_beats_package_shaped_harvest() ->
     meta = {"app_label": pkg}
     db = {pkg.lower(): "Curated Store Title"}
     assert resolve_operator_app_label(pkg, meta, {}, db) == "Curated Store Title"
+
+
+def test_resolve_operator_app_label_ignores_package_equal_db_name() -> None:
+    pkg = "com.example.app"
+    assert resolve_operator_app_label(pkg, {}, {}, {pkg.lower(): pkg}) == pkg
+    assert resolve_operator_app_label(pkg, {"app_label": "Harvest"}, {}, {pkg.lower(): pkg}) == "Harvest"

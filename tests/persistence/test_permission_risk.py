@@ -136,6 +136,120 @@ def test_persist_permission_risk_writes_risk_scores_and_vnext_rows(monkeypatch):
     assert vnext[0][1] == "android.permission.camera"
 
 
+def test_persist_permission_risk_classifies_health_and_background(monkeypatch):
+    report = DummyReport({"package_name": "com.example.health"})
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.permission_risk.risk_scores_db.upsert_risk",
+        lambda payload: None,
+    )
+    persist_permission_risk(
+        run_id=9,
+        static_run_id=9,
+        report=report,
+        package_name="com.example.health",
+        session_stamp="20250101-health",
+        scope_label="Test",
+        metrics_bundle=_bundle(0, 0, 0, 1.0, "A"),
+        baseline_payload={},
+        permission_profiles={
+            "android.permission.health.READ_HEART_RATE": {
+                "group": "HEALTH",
+                "is_runtime_dangerous": False,
+            },
+            "android.permission.CAMERA": {
+                "background_permission": "android.permission.BACKGROUND_CAMERA",
+                "is_runtime_dangerous": False,
+            },
+            "android.permission.INTERNET": {"is_runtime_dangerous": False},
+        },
+    )
+    rows = {
+        name: (risk_class, rationale)
+        for _run, name, _score, risk_class, rationale in _fetch_spr_vnext()
+    }
+    assert rows["android.permission.health.read_heart_rate"] == (
+        "MEDIUM",
+        "HEALTH_DATA_PERMISSION",
+    )
+    assert rows["android.permission.camera"] == ("MEDIUM", "BACKGROUND_SENSITIVE_PERMISSION")
+    assert rows["android.permission.internet"] == (None, None)
+
+
+def test_persist_permission_risk_marks_high_iss_severity(monkeypatch):
+    report = DummyReport({"package_name": "com.example.usage"})
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.permission_risk.risk_scores_db.upsert_risk",
+        lambda payload: None,
+    )
+    persist_permission_risk(
+        run_id=12,
+        static_run_id=12,
+        report=report,
+        package_name="com.example.usage",
+        session_stamp="20250101-usage",
+        scope_label="Test",
+        metrics_bundle=_bundle(0, 1, 0, 2.0, "B"),
+        baseline_payload={},
+        permission_profiles={
+            "android.permission.PACKAGE_USAGE_STATS": {
+                "is_runtime_dangerous": False,
+                "severity": 160,
+            },
+            "android.permission.INTERNET": {
+                "is_runtime_dangerous": False,
+                "severity": 0,
+            },
+        },
+    )
+    rows = {
+        name: (risk_class, rationale)
+        for _run, name, _score, risk_class, rationale in _fetch_spr_vnext()
+    }
+    assert rows["android.permission.package_usage_stats"] == (
+        "HIGH",
+        "HIGH_SEVERITY_PERMISSION",
+    )
+    assert rows["android.permission.internet"] == (None, None)
+
+
+def test_persist_permission_risk_ignores_process_background_names(monkeypatch):
+    report = DummyReport({"package_name": "com.example.sys"})
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.permission_risk.risk_scores_db.upsert_risk",
+        lambda payload: None,
+    )
+    persist_permission_risk(
+        run_id=11,
+        static_run_id=11,
+        report=report,
+        package_name="com.example.sys",
+        session_stamp="20250101-sys",
+        scope_label="Test",
+        metrics_bundle=_bundle(0, 1, 0, 1.0, "A"),
+        baseline_payload={},
+        permission_profiles={
+            "android.permission.START_ACTIVITIES_FROM_BACKGROUND": {
+                "is_runtime_dangerous": False,
+                "is_signature": True,
+            },
+            "android.permission.ACCESS_BACKGROUND_LOCATION": {
+                "is_runtime_dangerous": True,
+            },
+        },
+    )
+    rows = {
+        name: (risk_class, rationale)
+        for _run, name, _score, risk_class, rationale in _fetch_spr_vnext()
+    }
+    assert rows["android.permission.start_activities_from_background"][1] != (
+        "BACKGROUND_SENSITIVE_PERMISSION"
+    )
+    assert rows["android.permission.access_background_location"] == (
+        "MEDIUM",
+        "RUNTIME_DANGEROUS",
+    )
+
+
 def test_persist_permission_risk_writes_risk_scores_without_profiles(monkeypatch):
     session = "20250101-000001"
     report = DummyReport({"apk_id": 456})
@@ -620,3 +734,109 @@ def test_persist_permission_risk_uses_static_run_id_for_vnext(monkeypatch):
     )
 
     assert captured["run_id"] == 222
+
+
+def test_persist_permission_risk_batches_vnext_upserts(monkeypatch):
+    from scytaledroid.StaticAnalysis.cli.persistence import permission_risk as mod
+
+    monkeypatch.setattr(mod, "require_canonical_schema", lambda: None)
+    monkeypatch.setattr(mod, "_ensure_risk_scores_table", lambda: True)
+    monkeypatch.setattr(mod, "_ensure_permission_vnext_table", lambda: True)
+    monkeypatch.setattr(mod.risk_scores_db, "upsert_risk", lambda _record: None)
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        mod.permission_risk_db,
+        "upsert_vnext_many",
+        lambda payloads: captured.__setitem__("payloads", list(payloads)),
+    )
+    monkeypatch.setattr(
+        mod.permission_risk_db,
+        "upsert_vnext",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("expected batched vnext upsert")),
+    )
+
+    class _Report:
+        metadata = {"app_label": "TestApp"}
+
+    class _Bundle:
+        permission_detail = {
+            "score_3dp": 2.5,
+            "grade": "B",
+            "dangerous_count": 0,
+            "signature_count": 0,
+            "oem_count": 0,
+        }
+        permission_score = 2.5
+        permission_grade = "B"
+        dangerous_permissions = 0
+        signature_permissions = 0
+        oem_permissions = 0
+
+    mod.persist_permission_risk(
+        run_id=111,
+        static_run_id=222,
+        report=_Report(),
+        package_name="com.example.app",
+        session_stamp="sess",
+        scope_label="Example (com.example.app)",
+        metrics_bundle=_Bundle(),
+        baseline_payload={"app": {"package_name": "com.example.app"}},
+        permission_profiles={
+            "android.permission.INTERNET": {"guard_strength": "strong"},
+            "android.permission.CAMERA": {
+                "is_runtime_dangerous": True,
+                "guard_strength": "weak",
+            },
+        },
+    )
+
+    payloads = captured["payloads"]
+    assert isinstance(payloads, list)
+    assert len(payloads) == 2
+    assert {row["permission_name"] for row in payloads} == {
+        "android.permission.internet",
+        "android.permission.camera",
+    }
+    assert all(int(row["run_id"]) == 222 for row in payloads)
+
+
+def test_upsert_vnext_many_uses_run_sql_many(monkeypatch):
+    from scytaledroid.Database.db_func.static_analysis import (
+        static_permission_risk as risk_db,
+    )
+
+    monkeypatch.setattr(risk_db, "_IS_SQLITE", False)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        risk_db,
+        "run_sql_many",
+        lambda sql, rows, **kwargs: captured.update(sql=sql, rows=list(rows), kwargs=kwargs),
+    )
+    monkeypatch.setattr(
+        risk_db,
+        "upsert_vnext",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("expected batched upsert")),
+    )
+    risk_db.upsert_vnext_many(
+        [
+            {
+                "run_id": 1,
+                "permission_name": "android.permission.internet",
+                "risk_score": "1.000",
+                "risk_class": "HIGH",
+                "rationale_code": "RUNTIME_DANGEROUS_WEAK_GUARD",
+            },
+            {
+                "run_id": 1,
+                "permission_name": "android.permission.camera",
+                "risk_score": "0.100",
+                "risk_class": None,
+                "rationale_code": None,
+            },
+        ]
+    )
+    assert len(captured["rows"]) == 2
+    assert captured["rows"][0][1] == "android.permission.internet"
+    assert "%s" in str(captured["sql"])
+    assert "ON DUPLICATE KEY UPDATE" in str(captured["sql"])

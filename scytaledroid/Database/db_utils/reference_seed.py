@@ -29,6 +29,7 @@ _DEFAULT_PUBLISHERS: dict[str, tuple[str, str, int]] = {
 
 _CANONICAL_PROFILE_LABELS: dict[str, str] = {
     "RESEARCH_DATASET_ALPHA": "Research Dataset Alpha",
+    "SOCIAL": "Social Media",
 }
 
 def _insert_ignore_keyword() -> str:
@@ -106,6 +107,7 @@ def ensure_default_profiles() -> None:
 
     # Some legacy/static-ingest code paths still use profile_key='UNKNOWN'. Keep both.
     rows = [
+        ("SOCIAL", "Social Media", "Social media clients (package_profiles SOCIAL heuristic)", "research", 20),
         ("UNCLASSIFIED", "Unclassified", "Default profile bucket", "system", 999),
         ("UNKNOWN", "Unknown", "Legacy placeholder profile key", "system", 1000),
     ]

@@ -358,12 +358,9 @@ def render_persistence_audit_summary_section(session_stamp: str | None) -> None:
 
     if reconciliation:
         gap_items = [
-            ("missing_legacy_runs_count", "compat runs"),
             ("missing_legacy_risk_count", "permission posture risk"),
-            ("missing_secondary_compat_mirror_count", "secondary compat mirrors"),
             ("missing_findings_summary_count", "findings summary"),
             ("missing_string_summary_count", "string summary"),
-            ("bridge_only_runs_count", "compat-only runs"),
             ("bridge_only_risk_count", "compat-only permission posture risk"),
         ]
         active_gaps = [

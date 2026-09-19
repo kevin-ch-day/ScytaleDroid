@@ -55,11 +55,34 @@ SIGNAL_OBSERVATION_CONFIG: Mapping[str, dict[str, object]] = {
         "rationale": "Activity recognition permission requested.",
         "permissions": ("ACTIVITY_RECOGNITION",),
     },
+    "health_data": {
+        "severity_band": "WARN",
+        "score": 7,
+        "rationale": "Health Connect or health-data permissions requested.",
+        "permissions": (
+            "READ_HEALTH_DATA_IN_BACKGROUND",
+            "HEALTH_CONNECT",
+            "BODY_SENSORS",
+            "BODY_SENSORS_BACKGROUND",
+        ),
+    },
     "background_location": {
         "severity_band": "WARN",
         "score": 7,
         "rationale": "Background location requested.",
         "permissions": ("ACCESS_BACKGROUND_LOCATION",),
+    },
+    "background_camera": {
+        "severity_band": "WARN",
+        "score": 7,
+        "rationale": "Background camera access requested.",
+        "permissions": ("BACKGROUND_CAMERA",),
+    },
+    "background_audio": {
+        "severity_band": "WARN",
+        "score": 7,
+        "rationale": "Background microphone access requested.",
+        "permissions": ("RECORD_BACKGROUND_AUDIO",),
     },
     "storage_broad": {
         "severity_band": "WARN",

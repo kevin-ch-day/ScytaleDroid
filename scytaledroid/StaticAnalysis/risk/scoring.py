@@ -7,6 +7,13 @@ from dataclasses import dataclass
 
 from scytaledroid.StaticAnalysis.core.findings import SeverityLevel
 from scytaledroid.StaticAnalysis.core.models import StaticAnalysisReport
+from scytaledroid.StaticAnalysis.modules.permissions.analysis.curves import (
+    independent_risk_combine,
+)
+from scytaledroid.StaticAnalysis.modules.permissions.analysis.name_patterns import (
+    is_background_sensitive_name,
+    is_health_permission_name,
+)
 
 
 @dataclass(frozen=True)
@@ -67,11 +74,9 @@ def _secret_factor(
         for entry in secrets
         if str(entry.get("severity")) == SeverityLevel.P1.value
     )
-    score = min(
-        config.secret_cap,
-        p0_secret_count * config.secret_p0_weight
-        + p1_secret_count * config.secret_p1_weight,
-    )
+    impacts = [float(config.secret_p0_weight)] * p0_secret_count
+    impacts.extend([float(config.secret_p1_weight)] * p1_secret_count)
+    score = int(round(independent_risk_combine(impacts, scale=float(config.secret_cap))))
     if score <= 0:
         return (0, None)
     if p0_secret_count:
@@ -111,24 +116,60 @@ def _cleartext_factor(
     return (score, factor)
 
 
+def _permission_item_impact(
+    entry: Mapping[str, object],
+    *,
+    high_weight: int,
+) -> float:
+    """Map one permission row onto the composite impact scale.
+
+    After CVSS ISS per-permission scoring, runtime-dangerous names often land
+    in the Medium band (weight ~60-79). Counting only ``band == High`` dropped
+    CAMERA-class permissions from this heuristic surface.
+    """
+
+    name = str(entry.get("name") or "")
+    band = str(entry.get("band") or entry.get("risk") or "").strip()
+    try:
+        numeric = int(entry.get("weight") or 0)
+    except (TypeError, ValueError):
+        numeric = 0
+    profile = entry.get("profile") if isinstance(entry.get("profile"), Mapping) else {}
+    high = (
+        band == "High"
+        or numeric >= 80
+        or is_health_permission_name(name)
+        or is_background_sensitive_name(name)
+        or bool(profile.get("background_permission"))
+    )
+    if high:
+        return float(high_weight)
+    if band == "Medium" or numeric >= 60:
+        return float(high_weight) * 0.6
+    return 0.0
+
+
 def _permission_factor(
     permissions: Sequence[Mapping[str, object]],
     *,
     config: RiskConfig,
 ) -> tuple[int, RiskFactor | None]:
-    high_risk_permissions = sum(
-        1
+    impacts = [
+        _permission_item_impact(entry, high_weight=config.permission_weight)
         for entry in permissions
-        if str(entry.get("band") or entry.get("risk") or "").strip() == "High"
-    )
-    if high_risk_permissions <= 0:
+        if isinstance(entry, Mapping)
+    ]
+    impacts = [value for value in impacts if value > 0]
+    if not impacts:
         return (0, None)
-    score = min(config.permission_cap, high_risk_permissions * config.permission_weight)
+    score = int(round(independent_risk_combine(impacts, scale=float(config.permission_cap))))
+    if score <= 0:
+        return (0, None)
     factor = RiskFactor(
         "permissions",
         "high-risk permissions",
         score,
-        detail=f"count={high_risk_permissions}",
+        detail=f"count={len(impacts)}",
     )
     return (score, factor)
 

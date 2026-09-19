@@ -19,7 +19,6 @@ from scytaledroid.Database.summary_surfaces import (
 from scytaledroid.StaticAnalysis.cli.flows.session_finalizer import persist_static_session_links
 
 _PACKAGE_COLLATION_TARGETS: tuple[tuple[str, str], ...] = (
-    ("runs", "package"),
     ("risk_scores", "package_name"),
     ("static_session_run_links", "package_name"),
     ("static_findings_summary", "package_name"),
@@ -117,8 +116,7 @@ def _package_collation_snapshot() -> dict[str, str]:
         FROM information_schema.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE()
           AND (
-            (TABLE_NAME='runs' AND COLUMN_NAME='package')
-            OR (TABLE_NAME='risk_scores' AND COLUMN_NAME='package_name')
+            (TABLE_NAME='risk_scores' AND COLUMN_NAME='package_name')
             OR (TABLE_NAME='static_session_run_links' AND COLUMN_NAME='package_name')
             OR (TABLE_NAME='static_findings_summary' AND COLUMN_NAME='package_name')
             OR (TABLE_NAME='static_string_summary' AND COLUMN_NAME='package_name')
@@ -343,50 +341,18 @@ def reconcile_static_session(session_label: str | None = None) -> StaticSessionR
         "SELECT package_name FROM static_string_summary WHERE session_stamp=%s",
         (session,),
     )
-    legacy_run_packages = _package_query(
-        "SELECT package FROM runs WHERE session_stamp=%s",
-        (session,),
-    )
+    # Legacy-five package parity is not a persist gap. Current writers do not INSERT
+    # into ``runs`` / ``findings`` / ``metrics`` / ``buckets`` / ``contributors``.
+    # Keep empty sets so audit JSON keys stay stable.
+    legacy_run_packages: set[str] = set()
     legacy_risk_packages = _package_query(
         "SELECT package_name FROM risk_scores WHERE session_stamp=%s",
         (session,),
     )
-    legacy_findings_packages = _package_query(
-        """
-        SELECT DISTINCT r.package
-        FROM findings f
-        JOIN runs r ON r.run_id=f.run_id
-        WHERE r.session_stamp=%s
-        """,
-        (session,),
-    )
-    legacy_metrics_packages = _package_query(
-        """
-        SELECT DISTINCT r.package
-        FROM metrics m
-        JOIN runs r ON r.run_id=m.run_id
-        WHERE r.session_stamp=%s
-        """,
-        (session,),
-    )
-    legacy_buckets_packages = _package_query(
-        """
-        SELECT DISTINCT r.package
-        FROM buckets b
-        JOIN runs r ON r.run_id=b.run_id
-        WHERE r.session_stamp=%s
-        """,
-        (session,),
-    )
-    legacy_contributors_packages = _package_query(
-        """
-        SELECT DISTINCT r.package
-        FROM contributors c
-        JOIN runs r ON r.run_id=c.run_id
-        WHERE r.session_stamp=%s
-        """,
-        (session,),
-    )
+    legacy_findings_packages: set[str] = set()
+    legacy_metrics_packages: set[str] = set()
+    legacy_buckets_packages: set[str] = set()
+    legacy_contributors_packages: set[str] = set()
     session_run_links = _count_query(
         "SELECT COUNT(*) FROM static_session_run_links WHERE session_stamp=%s",
         (session,),
@@ -425,17 +391,17 @@ def reconcile_static_session(session_label: str | None = None) -> StaticSessionR
         "SELECT package_name FROM static_session_run_links WHERE session_stamp=%s",
         (session,),
     )
-    missing_legacy_runs = completed_packages - legacy_run_packages
+    missing_legacy_runs: set[str] = set()
     missing_risk_scores = completed_packages - legacy_risk_packages
-    missing_legacy_findings = completed_packages - legacy_findings_packages
-    missing_legacy_metrics = completed_packages - legacy_metrics_packages
-    missing_legacy_buckets = completed_packages - legacy_buckets_packages
-    missing_legacy_contributors = completed_packages - legacy_contributors_packages
+    missing_legacy_findings: set[str] = set()
+    missing_legacy_metrics: set[str] = set()
+    missing_legacy_buckets: set[str] = set()
+    missing_legacy_contributors: set[str] = set()
     missing_findings_summary = completed_packages - findings_summary_packages
     missing_string_summary = completed_packages - string_summary_packages
     missing_report_packages = completed_packages - report_packages
     stale_report_only_packages = report_packages - completed_packages
-    bridge_only_runs = legacy_run_packages - completed_packages
+    bridge_only_runs: set[str] = set()
     bridge_only_risk_scores = legacy_risk_packages - completed_packages
     missing_web_view_packages = completed_packages - web_view_packages
     missing_web_cache_packages = completed_packages - web_cache_packages

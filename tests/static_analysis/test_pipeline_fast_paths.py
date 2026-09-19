@@ -439,6 +439,9 @@ def test_analyze_apk_records_timing_metadata_and_cached_string_payload_for_split
         def to_snapshot(self, _declared: tuple[str, ...]) -> dict[str, object]:
             return {}
 
+        def merge_protection_levels(self, names, existing=None):
+            return dict(existing or {})
+
     class _FakeApk:
         def get_package(self) -> str:
             return "com.example.timed"

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.core.repository import (
+    RepositoryArtifact,
     discover_repository_artifacts,
     group_artifacts,
 )
@@ -237,6 +238,56 @@ def test_grouping_loads_receipt_backed_artifacts(tmp_path: Path) -> None:
     assert group.harvest_capture_status == "clean"
 
 
+def test_receipt_group_infers_base_when_is_base_omitted(tmp_path: Path) -> None:
+    sha256 = "a" * 64
+    canonical_apk = tmp_path / "data" / "store" / "apk" / "sha256" / "aa" / f"{sha256}.apk"
+    canonical_apk.parent.mkdir(parents=True, exist_ok=True)
+    canonical_apk.write_text("apk", encoding="utf-8")
+    receipt_root = tmp_path / "data" / "receipts" / "harvest"
+    receipt_path = receipt_root / "20260328-rda-full" / "com.example.nobase.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema": "harvest_package_manifest_v1",
+                "generated_at_utc": "2026-03-28T10:00:00Z",
+                "execution_state": "completed",
+                "package": {
+                    "package_name": "com.example.nobase",
+                    "version_name": "1.0",
+                    "version_code": "1",
+                    "session_label": "20260328-rda-full",
+                },
+                "execution": {
+                    "observed_artifacts": [
+                        {
+                            "split_label": "base",
+                            "file_name": "com.example.nobase__1__base.apk",
+                            "canonical_store_path": canonical_apk.relative_to(tmp_path).as_posix(),
+                            "sha256": sha256,
+                        }
+                    ]
+                },
+                "status": {"capture_status": "clean", "research_status": "pending_audit"},
+                "comparison": {"matches_planned_artifacts": True, "observed_hashes_complete": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cwd = Path.cwd()
+    try:
+        import os
+
+        os.chdir(tmp_path)
+        groups = group_artifacts(receipt_root)
+    finally:
+        os.chdir(cwd)
+
+    assert len(groups) == 1
+    assert groups[0].artifacts[0].metadata["is_split_member"] is False
+
+
 def test_receipt_group_blocks_when_declared_member_does_not_materialize(tmp_path: Path) -> None:
     base_sha = "f" * 64
     missing_sha = "e" * 64
@@ -442,3 +493,40 @@ def test_receipt_backed_cold_blob_resolves_when_mercury_mounted(
 
     assert len(groups) == 1
     assert groups[0].artifacts[0].path == cold_apk.resolve()
+
+
+def test_repository_artifact_heals_base_filename_tagged_as_split(tmp_path: Path) -> None:
+    path = tmp_path / "com.android.egg__12__base.apk"
+    path.write_bytes(b"apk")
+    artifact = RepositoryArtifact(
+        path=path,
+        display_path=path.name,
+        metadata={
+            "is_split_member": True,
+            "file_name": path.name,
+            "artifact": "base",
+        },
+    )
+    assert artifact.is_split_member is False
+
+
+def test_repository_artifact_unknown_name_defaults_to_base(tmp_path: Path) -> None:
+    path = tmp_path / "Egg.apk"
+    path.write_bytes(b"apk")
+    artifact = RepositoryArtifact(path=path, display_path=path.name, metadata={})
+    assert artifact.is_split_member is False
+
+
+def test_repository_artifact_keeps_explicit_split_members(tmp_path: Path) -> None:
+    path = tmp_path / "com.example.app__1__split_config.en.apk"
+    path.write_bytes(b"apk")
+    artifact = RepositoryArtifact(
+        path=path,
+        display_path=path.name,
+        metadata={
+            "is_split_member": True,
+            "file_name": path.name,
+            "artifact": "split_config.en",
+        },
+    )
+    assert artifact.is_split_member is True

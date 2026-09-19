@@ -45,8 +45,8 @@ def test_execute_harvest_keeps_db_repo_available_for_package_writes(
     monkeypatch.setattr(runner, "adb_pull", _fake_pull)
     monkeypatch.setattr(apk_repository, "ensure_storage_root", lambda host_name, data_root, *, context=None: 7)
 
-    def _ensure_app_definition(package_name, app_name=None, *, profile_key=None, context=None):
-        del app_name, context
+    def _ensure_app_definition(package_name, app_name=None, *, profile_key=None, category_name=None, context=None):
+        del app_name, context, category_name
         calls.append(("app_definition", package_name, profile_key))
         return 11
 
@@ -450,3 +450,130 @@ def test_execute_harvest_records_blocked_package_manifest_and_receipt(
 
     receipt_path = Path("data") / "receipts" / "harvest" / "20260328" / "com.example.blocked.json"
     assert receipt_path.exists()
+
+
+def test_persist_install_set_spine_infers_base_when_is_base_missing(tmp_path: Path) -> None:
+    from scytaledroid.Database.db_func.harvest import install_sets
+    from scytaledroid.DeviceAnalysis.harvest import runner
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactResult, PullResult
+
+    records: list[object] = []
+    events: list[tuple[str, str, object]] = []
+
+    class FakeInstallSets:
+        InstallSetMember = install_sets.InstallSetMember
+        InstallSetRecord = install_sets.InstallSetRecord
+
+        @staticmethod
+        def upsert_install_set(record):
+            records.append(record)
+            return 99
+
+    inventory = make_inventory_row(
+        package_name="com.android.egg",
+        version_code="12",
+        apk_paths=["/system/app/Egg/Egg.apk"],
+        primary_path="/system/app/Egg/Egg.apk",
+    )
+    plan = make_package_plan(
+        inventory=inventory,
+        artifacts=[
+            make_artifact_plan(
+                source_path="/system/app/Egg/Egg.apk",
+                artifact="base",
+                file_name="com.android.egg__12__base.apk",
+                is_split_member=False,
+            )
+        ],
+    )
+    result = PullResult(plan=plan)
+    result.ok.append(
+        ArtifactResult(
+            file_name="com.android.egg__12__base.apk",
+            apk_id=31400,
+            dest_path=tmp_path / "com.android.egg__12__base.apk",
+            source_path="/system/app/Egg/Egg.apk",
+            sha256="a" * 64,
+            artifact_label=None,
+            is_base=None,
+        )
+    )
+    stats = {
+        "db_harvest_sessions": 0,
+        "db_apk_sets": 0,
+        "db_apk_set_members": 0,
+        "db_harvest_observations": 0,
+    }
+
+    runner._persist_install_set_spine(
+        result=result,
+        serial="ZY22JK89DR",
+        session_stamp="20260328",
+        app_id=1,
+        snapshot_id=92,
+        db_install_sets=FakeInstallSets,
+        stats=stats,
+        emit=lambda level, event, extra=None, message=None: events.append((level, event, extra)),
+        base_context={},
+    )
+
+    assert records
+    assert records[0].members[0].role == "base"
+    assert stats["db_apk_sets"] == 1
+    assert ("info", "harvest.install_set.persisted") == (events[-1][0], events[-1][1])
+
+
+def test_persist_install_set_spine_emits_when_hash_is_invalid(tmp_path: Path) -> None:
+    from scytaledroid.Database.db_func.harvest import install_sets
+    from scytaledroid.DeviceAnalysis.harvest import runner
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactResult, PullResult
+
+    records: list[object] = []
+    events: list[tuple[str, str]] = []
+
+    class FakeInstallSets:
+        InstallSetMember = install_sets.InstallSetMember
+        InstallSetRecord = install_sets.InstallSetRecord
+
+        @staticmethod
+        def upsert_install_set(record):
+            records.append(record)
+            return 99
+
+    inventory = make_inventory_row(package_name="com.example.app", version_code="1")
+    plan = make_package_plan(
+        inventory=inventory,
+        artifacts=[
+            make_artifact_plan(
+                source_path="/data/app/com.example.app/base.apk",
+                artifact="base",
+                file_name="com_example_app_1__base.apk",
+            )
+        ],
+    )
+    result = PullResult(plan=plan)
+    result.ok.append(
+        ArtifactResult(
+            file_name="com_example_app_1__base.apk",
+            apk_id=1,
+            dest_path=tmp_path / "base.apk",
+            source_path="/data/app/com.example.app/base.apk",
+            sha256="not-a-digest",
+            is_base=True,
+        )
+    )
+
+    runner._persist_install_set_spine(
+        result=result,
+        serial="SER",
+        session_stamp="20260328",
+        app_id=1,
+        snapshot_id=1,
+        db_install_sets=FakeInstallSets,
+        stats={"db_harvest_sessions": 0, "db_apk_sets": 0, "db_apk_set_members": 0, "db_harvest_observations": 0},
+        emit=lambda level, event, extra=None, message=None: events.append((level, event)),
+        base_context={},
+    )
+
+    assert records == []
+    assert events == [("warning", "harvest.install_set.skipped_incomplete_hashes")]

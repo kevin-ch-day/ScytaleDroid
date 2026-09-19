@@ -41,9 +41,16 @@ Rows use **`apk_id` only when** report/metadata provides a real APK repository i
 
 ## Permission Intel availability
 
-- **Readiness** (menu or `scripts/db/permission_intel_readiness.py`): DSN resolution, **resolved database name** vs `android_permission_intel`, connectivity, required tables/views, dictionary read probe, governance gate. Writes are **not** auto-probed.
+- **Readiness** (menu or `scripts/db/permission_intel_readiness.py`): DSN resolution, **resolved database name** vs `android_permission_intel`, connectivity, required tables/views, dictionary read probe, governance gate, and **interpretation surfaces** used by the analysis catalog. Writes are **not** auto-probed.
 - **Wrong catalog name** (DSN points at another database): **ERROR** in **paper-grade** mode; **EXPERIMENTAL** in non–paper-grade mode (early exit so mispointed DSN is not confused with “Intel tables missing on the right catalog”).
 - **Missing / unreachable Intel** downgrades **governance** (paper-grade expectations) but **must not** crash core matrix/vnext persistence.
+- **Analysis catalog:** static detectors, matrix guard-strength, and permission
+  profiles prefer the accepted Permission Intel v1 projection when the Intel DSN
+  is reachable. Names that exist only in the AOSP/OEM dictionaries **and** carry
+  a non-empty protection level are merged in (v1 wins on overlap). YAML remains
+  the offline fallback. Missing interpretation views are a **WARN**, not a
+  paper-grade failure. Dictionary rows with NULL protection (for example some
+  deprecated AdServices constants) are not promoted into the analysis catalog.
 
 ## Persistence audit JSON (historical runs)
 

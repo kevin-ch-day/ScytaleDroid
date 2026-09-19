@@ -106,3 +106,35 @@ def test_render_error_when_paper_grade_and_not_configured(monkeypatch, capsys) -
     assert label == "ERROR"
     out = capsys.readouterr().out
     assert "ERROR" in out
+
+
+def test_render_paper_grade_ok_when_interpretation_surfaces_missing(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.permission_intel_readiness.assess_permission_intel_readiness",
+        lambda: pir.PermissionIntelReadiness(
+            configured=True,
+            resolved_database="android_permission_intel",
+            catalog_name_matches_expected=True,
+            connect_ok=True,
+            missing_tables=(),
+            governance_ok=True,
+            governance_detail="ok",
+            dictionary_select_ok=True,
+            missing_interpretation_surfaces=("android_permission_v1_scytaledroid_permission",),
+        ),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.permission_intel_readiness.intel_db.describe_target",
+        lambda: {
+            "database": "android_permission_intel",
+            "host": "h",
+            "port": 3306,
+            "user": "u",
+            "source": "t",
+        },
+    )
+    label = render_permission_intel_readiness(paper_grade_requested=True)
+    assert label == "OK"
+    out = capsys.readouterr().out
+    assert "android_permission_v1_scytaledroid_permission" in out
+    assert "YAML catalog fallback" in out

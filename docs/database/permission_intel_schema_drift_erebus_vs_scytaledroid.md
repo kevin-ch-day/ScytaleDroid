@@ -40,14 +40,20 @@ Scytale operators should assume **brownfield** PI catalogs may **differ** from t
 | **0047** | New **`android_permission_event_slice`** | **Analytics slice** derived from VT events. **Not** in `permission_intel.MANAGED_TABLES`; `check_permission_intel.py` does not flag it — optional for operators to create via Erebus migrations. |
 | **0046 / 0048** | VT-derived tables on **primary** catalog (`sha256` keyed) | Unrelated to Scytale PI dict writes. |
 
-### 2.1 `MANAGED_TABLES` gap
+### 2.1 `MANAGED_TABLES` vs interpretation surfaces
 
-`scytaledroid.Database.db_core.permission_intel.MANAGED_TABLES` lists Contract A dict/meta + governance + signal tables. It **does not** include:
+`scytaledroid.Database.db_core.permission_intel.MANAGED_TABLES` lists Contract A dict/meta + governance + signal tables (freeze/copy inventory). It **does not** include:
 
 - `android_permission_obs_sample` / `enrich_vt_*` / `run_aosp_import` (Scytale does not manage them yet).  
-- **`android_permission_event_slice`** (new Erebus PI table).
+- **`android_permission_event_slice`** (Erebus PI analytics).
+- Deployed v1 views and current-interpretation fact tables — those live in
+  **`INTERPRETATION_SURFACES`** and are reported by `check_permission_intel.py`
+  without becoming freeze/rename targets.
 
-**Recommendation:** Treat `event_slice` as **Erebus/ops** concern until Scytale reads it. Optionally extend `scripts/db/check_permission_intel.py` with an **informational** line if the table exists (docs-only unless product wants it).
+The undeployed `android_permission_v1_1_scytaledroid_permission` candidate is
+**not** a Scytale read surface. Catalog and lookup SQL use
+`android_permission_v1_scytaledroid_permission` plus
+`android_permission_v1_current_permission`.
 
 ---
 

@@ -10,10 +10,12 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql, run_sql_many
 from ...db_core.schema_introspection import table_exists
+from ...db_queries.harvest import apk_repository as apk_queries
 from ...db_queries.harvest import device_inventory as queries
 from ...db_utils.package_utils import is_suspicious_package_name, normalize_package_name
 
 _TABLES_READY = False
+_CATEGORY_ID_CACHE: dict[str, int | None] = {}
 
 
 def ensure_tables() -> bool:
@@ -152,6 +154,24 @@ def replace_packages(
         return 0
 
 
+def _lookup_existing_category_id(category_name: str) -> int | None:
+    """Resolve ``android_app_categories.category_id`` without creating rows."""
+
+    key = str(category_name or "").strip()
+    if not key:
+        return None
+    if key in _CATEGORY_ID_CACHE:
+        return _CATEGORY_ID_CACHE[key]
+    try:
+        row = run_sql(apk_queries.SELECT_CATEGORY_ID, (key,), fetch="one")
+        value = int(row[0]) if row else None
+    except Exception:
+        return None
+    if value is not None:
+        _CATEGORY_ID_CACHE[key] = value
+    return value
+
+
 def _bind_package(
     snapshot_id: int,
     device_serial: str,
@@ -173,7 +193,12 @@ def _bind_package(
         except (TypeError, ValueError):
             return None
 
-    split_count = _int(entry.get("split_count")) or 1
+    paths = entry.get("apk_paths")
+    path_count = 0
+    if isinstance(paths, (list, tuple)):
+        path_count = sum(1 for path in paths if str(path).strip())
+    declared_splits = _int(entry.get("split_count"))
+    split_count = max(declared_splits or 0, path_count, 1)
     is_split = 1 if split_count > 1 else 0
 
     inferred_category = 1 if bool(entry.get("inferred_category")) else 0
@@ -184,6 +209,11 @@ def _bind_package(
     apk_paths = _serialise_json(entry.get("apk_paths"))
 
     extras = _prepare_extras(entry)
+
+    category_name = _text(entry.get("category_name") or entry.get("category"))
+    category_id = _int(entry.get("category_id"))
+    if category_id is None and category_name:
+        category_id = _lookup_existing_category_id(category_name)
 
     raw_package = _text(entry.get("package_name"))
     if not raw_package:
@@ -207,8 +237,8 @@ def _bind_package(
         _text(entry.get("version_name")),
         _text(entry.get("version_code")),
         _text(entry.get("installer")),
-        _text(entry.get("category_name") or entry.get("category")),
-        _int(entry.get("category_id")),
+        category_name,
+        category_id,
         inferred_category,
         _text(entry.get("source")),
         _text(entry.get("partition")),

@@ -61,6 +61,24 @@ def _fetch_protections(
 
     missing = [name for name in names_upper if name not in results]
     if missing:
+        try:
+            from .catalog import load_permission_catalog
+
+            catalog = load_permission_catalog()
+        except Exception:
+            catalog = None
+        if catalog is not None:
+            for name in list(missing):
+                candidates = (name, f"android.permission.{name}")
+                for candidate in candidates:
+                    descriptor = catalog.describe(candidate)
+                    if descriptor is None or not descriptor.protection:
+                        continue
+                    results[name] = "|".join(descriptor.protection)
+                    missing.remove(name)
+                    break
+
+    if missing:
         fallback = _load_fallback_protections()
         for name in missing:
             entry = fallback.get(name)

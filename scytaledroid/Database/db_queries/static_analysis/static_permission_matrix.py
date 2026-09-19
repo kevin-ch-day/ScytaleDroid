@@ -79,6 +79,50 @@ INSERT INTO static_permission_matrix (
 )
 """
 
+INSERT_ROWS_MANY = """
+INSERT INTO static_permission_matrix (
+  run_id,
+  apk_id,
+  package_name,
+  permission_name,
+  source,
+  protection,
+  guard_strength,
+  declared_in,
+  tokens,
+  severity,
+  is_flagged_normal,
+  flags,
+  is_runtime_dangerous,
+  is_signature,
+  is_privileged,
+  is_special_access,
+  is_custom
+) VALUES (
+  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+)
+"""
+
+INSERT_ROW_KEYS = (
+    "run_id",
+    "apk_id",
+    "package_name",
+    "permission_name",
+    "source",
+    "protection",
+    "guard_strength",
+    "declared_in",
+    "tokens",
+    "severity",
+    "is_flagged_normal",
+    "flags",
+    "is_runtime_dangerous",
+    "is_signature",
+    "is_privileged",
+    "is_special_access",
+    "is_custom",
+)
+
 TABLE_EXISTS = """
 SELECT COUNT(*)
 FROM information_schema.tables
@@ -90,5 +134,7 @@ __all__ = [
     "CREATE_TABLE",
     "DELETE_FOR_RUN",
     "INSERT_ROWS",
+    "INSERT_ROWS_MANY",
+    "INSERT_ROW_KEYS",
     "TABLE_EXISTS",
 ]

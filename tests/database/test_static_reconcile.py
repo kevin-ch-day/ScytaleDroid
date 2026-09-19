@@ -40,7 +40,7 @@ def test_reconcile_static_session_summarizes_missing_packages(tmp_path: Path, mo
             return (2,)
         if "FROM information_schema.COLUMNS" in sql:
             return [
-                ("runs", "package", "utf8mb4_general_ci"),
+                ("risk_scores", "package_name", "utf8mb4_general_ci"),
                 ("static_session_run_links", "package_name", "latin1_swedish_ci"),
             ]
         if "SELECT a.package_name" in sql and "status='COMPLETED'" in sql:
@@ -51,17 +51,7 @@ def test_reconcile_static_session_summarizes_missing_packages(tmp_path: Path, mo
             return [("pkg.one",)]
         if "FROM static_string_summary" in sql:
             return [("pkg.one",), ("pkg.two",)]
-        if "SELECT package FROM runs" in sql:
-            return [("pkg.one",)]
         if "SELECT package_name FROM risk_scores" in sql:
-            return [("pkg.one",)]
-        if "FROM findings f" in sql:
-            return [("pkg.one",)]
-        if "FROM metrics m" in sql:
-            return [("pkg.one",)]
-        if "FROM buckets b" in sql:
-            return [("pkg.one",)]
-        if "FROM contributors c" in sql:
             return [("pkg.one",)]
         if "SELECT package_name FROM static_session_run_links WHERE session_stamp=%s" in sql:
             return [("pkg.one",)]
@@ -80,7 +70,7 @@ def test_reconcile_static_session_summarizes_missing_packages(tmp_path: Path, mo
     assert summary.report_files == 2
     assert summary.report_packages == 2
     assert summary.missing_session_links == {"pkg.two"}
-    assert summary.missing_legacy_runs == {"pkg.two"}
+    assert summary.missing_legacy_runs == set()
     assert summary.missing_risk_scores == {"pkg.two"}
     assert summary.missing_findings_summary == {"pkg.two"}
     assert summary.missing_string_summary == set()
@@ -90,11 +80,12 @@ def test_reconcile_static_session_summarizes_missing_packages(tmp_path: Path, mo
     assert summary.missing_web_view_packages == {"pkg.two"}
     assert summary.missing_web_cache_packages == {"pkg.one", "pkg.two"}
     assert summary.cache_stale is True
-    assert summary.package_collations["runs.package"] == "utf8mb4_general_ci"
+    assert summary.package_collations["risk_scores.package_name"] == "utf8mb4_general_ci"
     assert any(risk.startswith("mixed_package_collations=") for risk in summary.collation_risks)
-    assert summary.legacy_metrics_mirror_packages == 1
-    assert summary.legacy_buckets_mirror_packages == 1
-    assert summary.legacy_contributors_mirror_packages == 1
+    assert summary.legacy_metrics_mirror_packages == 0
+    assert summary.legacy_buckets_mirror_packages == 0
+    assert summary.legacy_contributors_mirror_packages == 0
+    assert summary.missing_secondary_compat_mirror_count == 0
 
 
 def test_repair_session_run_links_inserts_missing_rows(monkeypatch) -> None:

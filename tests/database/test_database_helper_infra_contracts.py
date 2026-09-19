@@ -115,6 +115,36 @@ def test_infer_failing_table_permission_risk() -> None:
     )
 
 
+def test_check_required_tables_batches_information_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _Engine:
+        _dialect = "mysql"
+
+        def fetch_all(self, sql, params=None):
+            captured["sql"] = sql
+            captured["params"] = params
+            return [("apps",), ("static_analysis_runs",)]
+
+    @contextmanager
+    def fake_session(reuse_connection: bool = False):
+        yield _Engine()
+
+    monkeypatch.setattr(diagnostics, "database_session", fake_session)
+    out = diagnostics.check_required_tables(
+        ["apps", "missing_table", "static_analysis_runs"]
+    )
+    assert out == {
+        "apps": True,
+        "missing_table": False,
+        "static_analysis_runs": True,
+    }
+    assert "IN (" in str(captured["sql"])
+    assert captured["params"] == ("apps", "missing_table", "static_analysis_runs")
+
+
 def test_reference_seed_executes_inserts(monkeypatch):
     calls = []
 

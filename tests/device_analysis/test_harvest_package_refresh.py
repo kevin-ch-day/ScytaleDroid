@@ -59,6 +59,7 @@ def test_refresh_inventory_row_from_device_avoids_pm_dump_when_identity_metadata
     assert refreshed.version_name == "4.1"
     assert refreshed.app_label == "Example App"
     assert refreshed.installer == "com.android.vending"
+    assert refreshed.category == "User"
     assert refreshed.primary_path == "/data/app/~~newtoken/com.example.app/base.apk"
     assert refreshed.apk_paths == [
         "/data/app/~~newtoken/com.example.app/base.apk",
@@ -115,6 +116,50 @@ def test_refresh_inventory_row_from_device_falls_back_to_pm_dump_when_metadata_m
     assert refreshed.version_name == "4.2"
     assert refreshed.app_label == "Example App"
     assert refreshed.installer == "com.android.vending"
+    assert refreshed.category == "User"
+
+
+def test_refresh_inventory_row_discards_package_equal_app_label(monkeypatch) -> None:
+    from scytaledroid.DeviceAnalysis import runtime_flags
+    from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
+
+    monkeypatch.setattr(runtime_flags, "allow_inventory_fallbacks", lambda: False)
+    monkeypatch.setattr(
+        adb_packages,
+        "get_package_paths",
+        lambda *_args, **_kwargs: ["/data/app/com.example.app/base.apk"],
+    )
+    monkeypatch.setattr(
+        adb_packages,
+        "list_packages_with_versions",
+        lambda *_args, **_kwargs: [("com.example.app", "1", "1.0")],
+    )
+    monkeypatch.setattr(
+        adb_packages,
+        "get_package_metadata",
+        lambda *_args, **_kwargs: {
+            "app_label": "com.example.app",
+            "installer": "com.android.vending",
+        },
+    )
+
+    inventory = InventoryRow(
+        raw={},
+        package_name="com.example.app",
+        app_label=None,
+        installer=None,
+        category=None,
+        primary_path="/data/app/com.example.app/base.apk",
+        profile_key=None,
+        profile=None,
+        version_name=None,
+        version_code="1",
+        apk_paths=["/data/app/com.example.app/base.apk"],
+        split_count=1,
+    )
+    refreshed = package_refresh.refresh_inventory_row_from_device("SER123", inventory)
+    assert refreshed.app_label is None
+    assert refreshed.category == "User"
 
 
 def test_refresh_inventory_row_from_device_skips_pm_dump_when_package_disappeared(
@@ -288,6 +333,46 @@ def test_written_artifacts_fit_plan_accepts_preserved_base_artifact() -> None:
             source_path="/data/app/com.example.app/base.apk",
             artifact_label="base",
             is_base=True,
+        )
+    ]
+
+    assert package_refresh.written_artifacts_fit_plan(refreshed_plan, written) is True
+
+
+def test_written_artifacts_fit_plan_infers_base_when_is_base_missing() -> None:
+    refreshed_plan = PackagePlan(
+        inventory=InventoryRow(
+            raw={},
+            package_name="com.example.app",
+            app_label="Example App",
+            installer="com.android.vending",
+            category=None,
+            primary_path="/data/app/com.example.app/base.apk",
+            profile_key="TEST_PROFILE",
+            profile=None,
+            version_name="1.0",
+            version_code="42",
+            apk_paths=["/data/app/com.example.app/base.apk"],
+            split_count=1,
+        ),
+        artifacts=[
+            ArtifactPlan(
+                source_path="/data/app/com.example.app/base.apk",
+                artifact="base",
+                file_name="com_example_app_42__base.apk",
+                is_split_member=False,
+            ),
+        ],
+        total_paths=1,
+    )
+    written = [
+        ArtifactResult(
+            file_name="com_example_app_42__base.apk",
+            apk_id=None,
+            dest_path=Path("/tmp/base.apk"),
+            source_path="/data/app/com.example.app/base.apk",
+            artifact_label="base",
+            is_base=None,
         )
     ]
 

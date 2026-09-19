@@ -97,7 +97,6 @@ def render_scoring_checks(
         print_status_line("warn", "grade distribution", detail="no snapshots available")
 
     optional_tables = {
-        "contributors": "legacy mirror / compat (optional; empty normal in canonical-only)",
         "risk_scores": "permission posture session rollup on core DB (not static_schema_gate); empty can be normal",
         "static_permission_risk_vnext": "canonical run-scoped permission risk detail (matrix sibling)",
     }
@@ -106,7 +105,6 @@ def render_scoring_checks(
         if count:
             level = "ok"
         elif table in {
-            "contributors",
             "risk_scores",
             "static_permission_risk_vnext",
         }:
@@ -117,3 +115,61 @@ def render_scoring_checks(
         if not count:
             detail += f" — {hint}"
         print_status_line(level, table, detail=detail)
+
+    try:
+        coverage = run_sql(
+            """
+            SELECT
+                   COUNT(*) AS matrix_rows,
+                   SUM(INSTR(flags, '"permission_group"') > 0) AS with_group,
+                   SUM(INSTR(flags, '"background_permission"') > 0) AS with_background,
+                   SUM(INSTR(flags, '"authority_class"') > 0) AS with_authority
+            FROM static_permission_matrix
+            """,
+            fetch="one",
+            dictionary=True,
+        )
+        if not isinstance(coverage, dict):
+            coverage = {}
+        matrix_rows = int(coverage.get("matrix_rows") or 0)
+        if matrix_rows:
+            detail = (
+                f"{matrix_rows} rows; group={int(coverage.get('with_group') or 0)} "
+                f"background={int(coverage.get('with_background') or 0)} "
+                f"authority={int(coverage.get('with_authority') or 0)}"
+            )
+            print_status_line("ok", "matrix Permission Intel flags", detail=detail)
+        else:
+            print_status_line("info", "matrix Permission Intel flags", detail="no matrix rows")
+    except Exception:
+        print_status_line(
+            "info",
+            "matrix Permission Intel flags",
+            detail="static_permission_matrix unavailable",
+        )
+
+    try:
+        rationale_rows = run_sql(
+            """
+            SELECT COALESCE(rationale_code, 'unclassified') AS rationale_code, COUNT(*) AS cnt
+            FROM static_permission_risk_vnext
+            GROUP BY 1
+            ORDER BY cnt DESC
+            LIMIT 8
+            """,
+            fetch="all",
+            dictionary=True,
+        ) or []
+        if rationale_rows:
+            detail = ", ".join(
+                f"{row.get('rationale_code') or '∅'}:{row.get('cnt')}" for row in rationale_rows
+            )
+            print_status_line("ok", "vnext rationale mix", detail=detail)
+        else:
+            print_status_line("info", "vnext rationale mix", detail="no classified rows")
+    except Exception:
+        print_status_line(
+            "info",
+            "vnext rationale mix",
+            detail="static_permission_risk_vnext unavailable",
+        )

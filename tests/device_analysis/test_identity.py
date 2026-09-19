@@ -49,3 +49,19 @@ def test_compute_split_membership_hash_is_order_stable() -> None:
     reversed_paths = list(reversed(paths))
 
     assert identity.compute_split_membership_hash(paths) == identity.compute_split_membership_hash(reversed_paths)
+
+
+def test_is_base_artifact_uses_filename_when_flag_missing() -> None:
+    assert identity.is_base_artifact(
+        is_base=None,
+        file_name="com.android.egg__12__base.apk",
+        split_label=None,
+    )
+    assert identity.is_base_artifact(is_base=False, file_name="base.apk")
+    assert identity.is_base_artifact(is_base=None, split_label="base")
+    assert not identity.is_base_artifact(
+        is_base=None,
+        file_name="com.example.app__1__split_config.en.apk",
+        split_label="split_config.en",
+    )
+    assert identity.is_base_artifact(is_base=True, file_name="split_config.en.apk")

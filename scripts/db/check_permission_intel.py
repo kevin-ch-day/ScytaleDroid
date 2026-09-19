@@ -88,6 +88,40 @@ def _main() -> int:
             print(f"  ERROR            {table} ({exc})")
             missing_tables.append(table)
 
+    print("# PERMISSION INTEL — interpretation surfaces (analysis catalog / current reads)")
+    missing_interpretation: list[str] = []
+    for table in intel_db.INTERPRETATION_SURFACES:
+        try:
+            ok = intel_db.intel_table_exists(table)
+            print(f"  {'OK' if ok else 'WARN MISSING':16}  {table}")
+            if not ok:
+                missing_interpretation.append(table)
+        except Exception as exc:
+            print(f"  WARN             {table} ({exc})")
+            missing_interpretation.append(table)
+    if missing_interpretation:
+        print(
+            "  INFO note: static analysis falls back to config/framework_permissions.yaml "
+            "when deployed v1 views are missing; paper-grade still uses governance counts."
+        )
+
+    print("# PERMISSION INTEL — analysis catalog projection")
+    try:
+        v1_count = intel_db.run_sql(
+            f"""
+            SELECT COUNT(*) FROM {intel_db.V1_SCYTALEDROID_PERMISSION_VIEW}
+            WHERE authority_class IN (
+                'AOSP_PUBLIC', 'AOSP_HIDDEN', 'AOSP_INTERNAL', 'AOSP_MODULE'
+            )
+            """,
+            fetch="one",
+            query_name="check_permission_intel.v1_catalog_count",
+            read_only=True,
+        )
+        print(f"  INFO v1_aosp_class_rows: {int(v1_count[0] or 0) if v1_count else 0}")
+    except Exception as exc:
+        print(f"  WARN v1_aosp_class_rows: query failed ({exc})")
+
     if not missing_tables:
         print("# PERMISSION INTEL — dictionary read probe (DB menu / static readiness use same probe)")
         try:

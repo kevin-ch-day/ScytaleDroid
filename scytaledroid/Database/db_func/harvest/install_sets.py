@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,6 +16,7 @@ from scytaledroid.Utils.install_set_identity import (
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql
+from ...db_queries.harvest import apk_repository as apk_q
 from ...db_queries.harvest import install_sets as q
 
 
@@ -114,6 +115,9 @@ def upsert_install_set(record: InstallSetRecord) -> int | None:
         return None
     if any(not _valid_sha(member.sha256) for member in record.members):
         return None
+
+    record = replace(record, members=_with_resolved_apk_ids(record))
+    base_members = [member for member in record.members if member.role == "base"]
 
     ensure_tables()
     app = _lookup_app_version(record)
@@ -253,6 +257,38 @@ def _lookup_app_version(record: InstallSetRecord) -> dict[str, Any]:
         query_name="harvest.install_sets.lookup_app_version",
     )
     return dict(row or {})
+
+
+def _with_resolved_apk_ids(record: InstallSetRecord) -> tuple[InstallSetMember, ...]:
+    resolved: list[InstallSetMember] = []
+    for member in record.members:
+        if member.apk_id is not None:
+            resolved.append(member)
+            continue
+        apk_id = _lookup_apk_id(member.sha256, record.package_name)
+        resolved.append(member if apk_id is None else replace(member, apk_id=apk_id))
+    return tuple(resolved)
+
+
+def _lookup_apk_id(sha256: str, package_name: str) -> int | None:
+    try:
+        row = run_sql(
+            apk_q.SELECT_APK_ID_BY_PACKAGE_SHA256,
+            (sha256, package_name),
+            fetch="one",
+            query_name="harvest.install_sets.lookup_apk_id_by_package",
+        )
+        if row:
+            return int(row[0])
+        row = run_sql(
+            apk_q.SELECT_APK_ID_BY_SHA256,
+            (sha256,),
+            fetch="one",
+            query_name="harvest.install_sets.lookup_apk_id",
+        )
+        return int(row[0]) if row else None
+    except Exception:
+        return None
 
 
 def _ordered_members(members: Sequence[InstallSetMember]) -> list[InstallSetMember]:

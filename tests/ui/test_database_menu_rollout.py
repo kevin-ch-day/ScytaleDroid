@@ -58,6 +58,7 @@ def test_query_runner_menu_uses_shared_actions(monkeypatch, capsys):
     assert "Curated Read-only Queries" in out
     assert "Actions" in out
     assert captured["spec"].items[0] == ("1", "Active static session")
+    assert ("14", "Permission Intel matrix classifications") in captured["spec"].items
 
 
 def test_query_runner_active_static_session_renders_compact_status(monkeypatch, capsys, tmp_path):
@@ -111,6 +112,41 @@ def test_query_runner_active_static_session_renders_compact_status(monkeypatch, 
     assert ("Archive reports", 2) in captured[0]
     assert ("Session links", "0") in captured[1]
     assert ("Findings summary", "0") in captured[1]
+
+
+def test_query_runner_permission_intel_classifications(monkeypatch, capsys):
+    from scytaledroid.Database.db_utils.menus import query_runner as menu_module
+
+    monkeypatch.setattr(menu_module.prompt_utils, "press_enter_to_continue", lambda *_a, **_k: None)
+
+    def _run_read_only(sql, params=(), fetch=None, dictionary=False, **_kwargs):
+        if "with_group" in sql:
+            return {
+                "matrix_rows": 10,
+                "with_group": 4,
+                "with_background": 2,
+                "with_authority": 4,
+                "with_feature": 1,
+            }
+        if "rationale_code" in sql and "GROUP BY" in sql:
+            return [{"rationale_code": "HEALTH_DATA_PERMISSION", "cnt": 3}]
+        return [
+            {
+                "package_name": "com.example.health",
+                "permission_name": "android.permission.health.READ_HEART_RATE",
+                "severity": 80,
+                "risk_class": "SENSITIVE",
+                "rationale_code": "HEALTH_DATA_PERMISSION",
+            }
+        ]
+
+    monkeypatch.setattr(menu_module, "_run_read_only", _run_read_only)
+    menu_module.show_permission_intel_matrix_classifications()
+    out = capsys.readouterr().out
+    assert "Permission Intel matrix classifications" in out
+    assert "HEALTH_DATA_PERMISSION" in out
+    assert "With group" in out
+    assert "android.permission.health" in out
 
 
 def test_session_downstream_counts_skips_legacy_runs_when_table_absent(monkeypatch):

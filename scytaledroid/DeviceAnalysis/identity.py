@@ -127,6 +127,37 @@ def first_nonempty_text(*values: Any) -> str | None:
     return None
 
 
+_BASE_FILE_NAMES = frozenset({"base.apk"})
+_BASE_LABELS = frozenset({"base", "base.apk"})
+_TRUTHY_IS_BASE = frozenset({"1", "true", "yes"})
+
+
+def is_base_artifact(
+    *,
+    is_base: object = None,
+    file_name: str | None = None,
+    split_label: str | None = None,
+) -> bool:
+    """Return True when an APK member is the install-set base.
+
+    Filename and split label win over a missing or false ``is_base`` flag so
+    older harvest manifests and mis-tagged ``base.apk`` members still persist
+    as a unique base instead of every member becoming a split.
+    """
+
+    name = str(file_name or "").strip().lower()
+    if "/" in name or "\\" in name:
+        name = name.replace("\\", "/").rsplit("/", 1)[-1]
+    label = str(split_label or "").strip().lower()
+    if name in _BASE_FILE_NAMES or name.endswith("__base.apk") or label in _BASE_LABELS:
+        return True
+    if is_base is True:
+        return True
+    if isinstance(is_base, str) and is_base.strip().lower() in _TRUTHY_IS_BASE:
+        return True
+    return False
+
+
 __all__ = [
     "compute_signer_set_hash",
     "compute_split_membership_hash",
@@ -134,6 +165,7 @@ __all__ = [
     "extract_embedded_mapping",
     "extract_signer_digests",
     "first_nonempty_text",
+    "is_base_artifact",
     "normalize_hex_digest",
     "resolve_text_field",
     "resolve_hex_digest",

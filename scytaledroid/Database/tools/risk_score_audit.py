@@ -16,6 +16,7 @@ from scytaledroid.StaticAnalysis.modules.permissions.analysis.tokens import (
     is_scored_flagged_normal,
 )
 from scytaledroid.StaticAnalysis.risk.permission import (
+    collect_catalog_score_signals,
     permission_risk_grade,
     permission_risk_score_detail,
 )
@@ -220,6 +221,7 @@ def _replay_session_scores(
         except Exception:
             target_sdk = None
 
+        catalog_signals = collect_catalog_score_signals(permission_profiles)
         recomputed = permission_risk_score_detail(
             dangerous=int(row.get("dangerous_count") or 0),
             signature=int(row.get("signature_count") or 0),
@@ -232,6 +234,9 @@ def _replay_session_scores(
             noteworthy_normals=int(split.get("noteworthy_normal_count") or 0),
             special_risk_normals=int(split.get("special_risk_normal_count") or 0),
             weak_guards=int(split.get("weak_guard_count") or 0),
+            background_sensitive=catalog_signals["background_sensitive"],
+            health_sensitive=catalog_signals["health_sensitive"],
+            privileged_declared=catalog_signals["privileged_declared"],
         )
         old_score = float(row.get("score_capped") or 0.0)
         new_score = float(recomputed.get("score_3dp") or recomputed.get("score_capped") or 0.0)

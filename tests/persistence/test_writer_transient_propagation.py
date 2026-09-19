@@ -53,7 +53,8 @@ def test_resolve_apk_set_id_for_artifact_set_hash_requires_unique_match(
         run_writers.resolve_apk_set_id_for_artifact_set_hash("ABC", artifact_set_hash_version="v2")
         == 6485
     )
-    assert "artifact_set_hash_version" in str(captured["sql"])
+    assert "artifact_set_hash_version = %s" in str(captured["sql"])
+    assert "LOWER(TRIM" not in str(captured["sql"])
     assert captured["params"] == ("abc", "v2")
 
     def _ambiguous(*_args, **_kwargs):

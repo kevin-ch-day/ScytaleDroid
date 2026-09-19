@@ -74,3 +74,46 @@ def test_collect_receipt_sets_requires_observed_hashes_and_base(tmp_path: Path) 
     assert item.completeness_state == "complete"
     assert item.artifact_set_hash == artifact_set_hash_v1(["b" * 64, "a" * 64])
     assert [member.split_name for member in item.members] == ["base", "split_config.xhdpi"]
+
+
+def test_collect_receipt_sets_infers_base_from_canonical_filename(tmp_path: Path) -> None:
+    root = tmp_path / "data" / "receipts" / "harvest" / "session-b"
+    root.mkdir(parents=True)
+    receipt = root / "com.android.egg.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "comparison": {
+                    "planned_artifact_count": 1,
+                    "observed_artifact_count": 1,
+                },
+                "execution": {
+                    "observed_artifacts": [
+                        {
+                            "file_name": "com.android.egg__12__base.apk",
+                            "split_label": "base",
+                            "sha256": "c" * 64,
+                            "pull_outcome": "written",
+                        }
+                    ]
+                },
+                "generated_at_utc": "2026-05-13T03:28:22.254974Z",
+                "package": {
+                    "device_serial": "SERIAL1",
+                    "package_name": "com.android.egg",
+                    "session_label": "session-b",
+                    "version_code": "12",
+                    "version_name": "1.0",
+                },
+                "status": {"capture_status": "clean"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    sets, skipped = collect_receipt_sets(root.parent, limit=0)
+
+    assert skipped["missing_hash"] == 0
+    assert len(sets) == 1
+    assert sets[0].base_sha256 == "c" * 64
+    assert sets[0].members[0].role == "base"

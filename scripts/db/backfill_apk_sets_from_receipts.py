@@ -20,6 +20,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scytaledroid.DeviceAnalysis.identity import is_base_artifact
 from scytaledroid.Utils.install_set_identity import hash_v1_ordered_digests
 
 
@@ -182,7 +183,11 @@ def _parse_receipt(path: Path, payload: dict[str, Any]) -> ReceiptSet | None:
         digest = _member_sha(item)
         if not digest:
             return None
-        is_base = bool(item.get("is_base")) or str(item.get("split_label") or "").lower() == "base"
+        is_base = is_base_artifact(
+            is_base=item.get("is_base"),
+            file_name=str(item.get("file_name") or ""),
+            split_label=str(item.get("split_label") or ""),
+        )
         split = str(item.get("split_label") or ("base" if is_base else item.get("file_name") or "")).strip()
         if not split:
             split = "base" if is_base else f"split_{idx}"

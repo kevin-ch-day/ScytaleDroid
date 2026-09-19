@@ -147,9 +147,11 @@ def test_permission_intel_fetch_aosp_permission_dict_rows_case_insensitive(monke
         case_insensitive=True,
     )
 
-    assert "LOWER(constant_value)" in str(captured["query"])
-    assert "lifecycle_status" in str(captured["query"])
-    assert "invalid_token" in str(captured["query"])
+    assert "LOWER(constant_value)" not in str(captured["query"])
+    assert "constant_value_norm IN" in str(captured["query"])
+    assert "lifecycle_status IS NULL OR lifecycle_status <> 'invalid_token'" in str(
+        captured["query"]
+    )
     assert captured["params"] == ("android.permission.camera",)
     assert rows[0][0] == "android.permission.CAMERA"
 
@@ -171,6 +173,9 @@ def test_current_interpretation_uses_deployed_evidence_surfaces(monkeypatch):
     assert rows == []
     assert "android_permission_v1_current_permission" in sql
     assert "api_permission_declaration_conflict" in sql
+    assert "GROUP BY permission_id" in sql
+    assert "COUNT(c.conflict_id)" not in sql
+    assert "BINARY sp.canonical_permission" not in sql
     assert "android_permission_v1_1_" not in sql
     assert "SELECT %s AS lookup_token_norm" in sql
     assert "FROM android_permission_dict_aosp\n                 WHERE" not in sql
@@ -196,10 +201,70 @@ def test_oem_lookup_requires_resolved_vendor_and_exact_token(monkeypatch):
     assert captured["params"] == ("vendor.example.permission.ACCESS",)
 
 
+def test_oem_catalog_rows_require_protection_and_resolved_vendor(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_run_sql(query, params=None, **kwargs):
+        captured["query"] = query
+        captured["kwargs"] = kwargs
+        return []
+
+    monkeypatch.setattr(permission_intel, "run_sql", _fake_run_sql)
+    permission_intel.fetch_oem_permission_catalog_rows()
+    sql = str(captured["query"])
+    assert "INNER JOIN android_permission_meta_oem_vendor" in sql
+    assert "TRIM(o.protection_level)" in sql
+    assert captured["kwargs"]["read_only"] is True
+
+
+def test_aosp_catalog_rows_filter_protection_in_sql(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_run_sql(query, params=None, **kwargs):
+        captured["query"] = query
+        captured["kwargs"] = kwargs
+        return []
+
+    monkeypatch.setattr(permission_intel, "run_sql", _fake_run_sql)
+    permission_intel.fetch_aosp_permission_catalog_rows()
+    sql = str(captured["query"])
+    assert "TRIM(protection_level)" in sql
+    assert "COALESCE(lifecycle_status" not in sql
+    assert captured["kwargs"]["read_only"] is True
+
+
 def test_permission_intel_intel_table_exists(monkeypatch):
-    monkeypatch.setattr(permission_intel, "run_sql", lambda *args, **kwargs: (1,))
+    calls: list[int] = []
+
+    def _run_sql(*args, **kwargs):
+        calls.append(1)
+        return (1,)
+
+    monkeypatch.setattr(permission_intel, "run_sql", _run_sql)
+    permission_intel._INTEL_TABLES_PRESENT.clear()
 
     assert permission_intel.intel_table_exists("permission_signal_catalog") is True
+    assert permission_intel.intel_table_exists("permission_signal_catalog") is True
+    assert calls == [1]
+
+
+def test_fetch_vendor_prefix_rules_is_process_cached(monkeypatch):
+    from scytaledroid.Database.db_func.permissions import permission_dicts as permission_dicts_db
+
+    calls: list[int] = []
+
+    def _rows():
+        calls.append(1)
+        return [(1, "com.samsung.", "prefix")]
+
+    monkeypatch.setattr(permission_dicts_db.intel_db, "fetch_vendor_prefix_rule_rows", _rows)
+    permission_dicts_db.fetch_vendor_prefix_rules.cache_clear()
+    first = permission_dicts_db.fetch_vendor_prefix_rules()
+    second = permission_dicts_db.fetch_vendor_prefix_rules()
+    assert calls == [1]
+    assert first == second
+    assert first[0]["namespace_prefix"] == "com.samsung."
+    permission_dicts_db.fetch_vendor_prefix_rules.cache_clear()
 
 
 def test_permission_intel_fetch_signal_catalog_rows(monkeypatch):

@@ -37,6 +37,10 @@ class PermissionDescriptor:
     declaration_state: str = "UNSPECIFIED"
     applicability_state: str = "UNSPECIFIED"
     protection_state: str = "UNSPECIFIED"
+    permission_group: str | None = None
+    background_permission: str | None = None
+    authority_class: str | None = None
+    feature_dependency: str | None = None
 
     def base_level(self) -> str | None:
         for token in self.protection:
@@ -49,6 +53,7 @@ class PermissionDescriptor:
                 "signatureorinstaller",
                 "privileged",
                 "installer",
+                "internal",
             }:
                 return lowered
         return None
@@ -65,6 +70,7 @@ class PermissionDescriptor:
             "signatureorinstaller",
             "privileged",
             "installer",
+            "internal",
         }:
             return "signature"
         if level == "dangerous":
@@ -114,8 +120,35 @@ class PermissionCatalog:
                 "declaration_state": descriptor.declaration_state,
                 "applicability_state": descriptor.applicability_state,
                 "protection_state": descriptor.protection_state,
+                "permission_group": descriptor.permission_group,
+                "background_permission": descriptor.background_permission,
+                "authority_class": descriptor.authority_class,
+                "feature_dependency": descriptor.feature_dependency,
             }
         return snapshot
+
+    def merge_protection_levels(
+        self,
+        names: Iterable[str],
+        existing: Mapping[str, Sequence[str]] | None = None,
+    ) -> dict[str, tuple[str, ...]]:
+        """Keep APK-declared levels and fill gaps from this catalog."""
+
+        merged: dict[str, tuple[str, ...]] = {}
+        for name, levels in (existing or {}).items():
+            key = str(name or "").strip()
+            tokens = tuple(str(token).strip().lower() for token in levels if token)
+            if key and tokens:
+                merged[key] = tokens
+        for name in names:
+            key = str(name or "").strip()
+            if not key or key in merged:
+                continue
+            descriptor = self.describe(key)
+            if descriptor is None or not descriptor.protection:
+                continue
+            merged[key] = descriptor.protection
+        return merged
 
 
 def _load_yaml_catalog(
@@ -144,45 +177,123 @@ def _load_yaml_catalog(
     return entries
 
 
+def _canonical_permission_group(value: object) -> str | None:
+    """Match APK group shorts; drop v1 UNDEFINED placeholders."""
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered.startswith("android.permission-group."):
+        text = text.rsplit(".", 1)[-1]
+    if text.upper() == "UNDEFINED":
+        return None
+    return text
+
+
+def _descriptor_from_v1_row(row: Mapping[str, object]) -> PermissionDescriptor | None:
+    name = str(row.get("canonical_permission") or "").strip()
+    if not name:
+        return None
+    protection_state = str(row.get("protection_state") or "UNSPECIFIED")
+    protection_expr = row.get("compatibility_protection_expression") or row.get("protection_base")
+    tokens = (
+        tuple()
+        if protection_state.startswith("UNKNOWN_")
+        else _normalise_tokens(protection_expr)
+    )
+    group = _canonical_permission_group(row.get("permission_group"))
+    background = str(row.get("background_permission") or "").strip() or None
+    authority = str(row.get("authority_class") or "").strip() or None
+    feature = str(row.get("feature_dependency") or "").strip() or None
+    return PermissionDescriptor(
+        name=name,
+        protection=tokens,
+        source="permission_intel_v1",
+        added_api=_coerce_int(row.get("accepted_platform_release")),
+        deprecated_api=None,
+        declaration_state=str(
+            row.get("declaration_state") or row.get("lifecycle") or "UNSPECIFIED"
+        ),
+        applicability_state=str(row.get("applicability_state") or "UNSPECIFIED"),
+        protection_state=protection_state,
+        permission_group=group,
+        background_permission=background,
+        authority_class=authority,
+        feature_dependency=feature,
+    )
+
+
 def _load_db_catalog() -> tuple[Mapping[str, PermissionDescriptor], str]:
     try:
         from scytaledroid.Database.db_core import permission_intel as intel_q
     except Exception:
         return {}, "0"
 
-    try:
-        rows = intel_q.fetch_v1_permission_catalog_rows()
-    except Exception:
-        return {}, "v1-unavailable" if intel_q.is_permission_intel_configured() else "0"
-    if not rows:
+    if not intel_q.is_permission_intel_configured():
         return {}, "0"
 
     entries: MutableMapping[str, PermissionDescriptor] = {}
-    for row in rows:
-        if not row:
-            continue
-        name = str(row.get("canonical_permission") or "").strip()
-        if not name:
-            continue
-        protection_state = str(row.get("protection_state") or "UNKNOWN_UNSPECIFIED")
-        tokens = (
-            tuple()
-            if protection_state.startswith("UNKNOWN_")
-            else _normalise_tokens(row.get("compatibility_protection_expression"))
-        )
-        entries[name] = PermissionDescriptor(
-            name=name,
-            protection=tokens,
-            source="permission_intel_v1_1_shadow",
-            added_api=_coerce_int(row.get("accepted_platform_release")),
-            deprecated_api=None,
-            declaration_state=str(row.get("declaration_state") or "UNKNOWN"),
-            applicability_state=str(row.get("applicability_state") or "UNKNOWN"),
-            protection_state=protection_state,
-        )
+    present: set[str] = set()
 
-    version = str(len(entries))
-    return entries, version
+    def _add(descriptor: PermissionDescriptor) -> None:
+        key = descriptor.name.casefold()
+        if not key or key in present:
+            return
+        present.add(key)
+        entries[descriptor.name] = descriptor
+
+    try:
+        for row in intel_q.fetch_v1_permission_catalog_rows() or []:
+            if not row:
+                continue
+            descriptor = _descriptor_from_v1_row(row)
+            if descriptor is not None:
+                _add(descriptor)
+    except Exception:
+        pass
+
+    try:
+        for row in intel_q.fetch_aosp_permission_catalog_rows() or []:
+            if not row:
+                continue
+            name = str(row[0] or "").strip()
+            protection = str(row[1] or "").strip()
+            if not name or not protection:
+                continue
+            _add(
+                PermissionDescriptor(
+                    name=name,
+                    protection=_normalise_tokens(protection),
+                    source="permission_intel_aosp_dict",
+                    added_api=_coerce_int(row[2] if len(row) > 2 else None),
+                    deprecated_api=_coerce_int(row[3] if len(row) > 3 else None),
+                )
+            )
+    except Exception:
+        pass
+
+    try:
+        for row in intel_q.fetch_oem_permission_catalog_rows() or []:
+            if not row:
+                continue
+            name = str(row[0] or "").strip()
+            protection = str(row[1] or "").strip()
+            if not name or not protection:
+                continue
+            _add(
+                PermissionDescriptor(
+                    name=name,
+                    protection=_normalise_tokens(protection),
+                    source="permission_intel_oem_dict",
+                )
+            )
+    except Exception:
+        pass
+
+    if not entries:
+        return {}, "0"
+    return entries, str(len(entries))
 
 
 def _coerce_int(value: object) -> int | None:
@@ -224,12 +335,16 @@ def _default_catalog_paths() -> tuple[Path, ...]:
 
 @lru_cache(maxsize=1)
 def load_permission_catalog() -> PermissionCatalog:
-    """Load the authoritative legacy framework-permission catalog.
+    """Load the analysis catalog: deployed Permission Intel v1, then YAML.
 
-    Candidate Permission Intel v1 data is deliberately excluded from this path.
-    Call :func:`load_permission_catalog_shadow` for an isolated comparison.
+    YAML is the offline fallback when Permission Intel is unset, unreachable,
+    or the accepted v1 projection is empty. Call
+    :func:`load_permission_catalog_shadow` for an isolated COMPARE_ONLY read.
     """
 
+    db_entries, db_version = _load_db_catalog()
+    if db_entries:
+        return PermissionCatalog(entries=db_entries, version=db_version)
     for path in _default_catalog_paths():
         try:
             origin = path.stem
@@ -244,11 +359,12 @@ def load_permission_catalog() -> PermissionCatalog:
 
 
 def load_permission_catalog_shadow() -> PermissionCatalog | None:
-    """Return an isolated candidate catalog only in explicit comparison mode.
+    """Return an isolated deployed-v1 catalog only in explicit comparison mode.
 
-    The returned object is never substituted into :func:`load_permission_catalog`.
-    Callers performing diagnostics must compare it explicitly with the legacy
-    result. Candidate absence or read failure is represented by ``None``.
+    COMPARE_ONLY is a diagnostic read. Analysis already prefers the same
+    deployed v1 projection through :func:`load_permission_catalog` when PI is
+    reachable; this helper never writes and never enables PI mutation.
+    Candidate absence or read failure is represented by ``None``.
     """
 
     mode = os.getenv(_SHADOW_MODE_ENV, "LEGACY_ONLY").strip().upper()

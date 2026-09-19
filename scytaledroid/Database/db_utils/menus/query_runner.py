@@ -47,6 +47,7 @@ def run_query_menu() -> None:
             ("11", "Interrupted permission partials"),
             ("12", "MASVS session summary (canonical view)"),
             ("13", "Static session grain / integrity (split-heavy triage)"),
+            ("14", "Permission Intel matrix classifications"),
         )
         spec = menu_utils.MenuSpec(
             items=options,
@@ -84,6 +85,8 @@ def run_query_menu() -> None:
             prompt_masvs_session_summary()
         elif choice == "13":
             prompt_static_session_grain_report()
+        elif choice == "14":
+            show_permission_intel_matrix_classifications()
         elif choice == "0":
             break
 
@@ -527,6 +530,115 @@ def show_harvested_version_gaps() -> None:
         ["Package", "Missing Pairs"],
         [[str(row.get("package_name") or "—"), str(row.get("missing_pairs") or 0)] for row in rows],
     )
+    prompt_utils.press_enter_to_continue()
+
+
+def show_permission_intel_matrix_classifications() -> None:
+    coverage = _run_read_only(
+        """
+        SELECT
+               COUNT(*) AS matrix_rows,
+               SUM(INSTR(flags, '"permission_group"') > 0) AS with_group,
+               SUM(INSTR(flags, '"background_permission"') > 0) AS with_background,
+               SUM(INSTR(flags, '"authority_class"') > 0) AS with_authority,
+               SUM(INSTR(flags, '"feature_dependency"') > 0) AS with_feature
+        FROM static_permission_matrix
+        """,
+        fetch="one",
+        dictionary=True,
+    )
+    rationale_rows = _run_read_only(
+        """
+        SELECT COALESCE(rationale_code, 'unclassified') AS rationale_code, COUNT(*) AS cnt
+        FROM static_permission_risk_vnext
+        GROUP BY 1
+        ORDER BY cnt DESC
+        LIMIT 12
+        """,
+        fetch="all",
+        dictionary=True,
+    )
+    sample_rows = _run_read_only(
+        """
+        SELECT
+               a.package_name,
+               spm.permission_name,
+               spm.severity,
+               v.risk_class,
+               v.rationale_code
+        FROM static_permission_matrix spm
+        JOIN static_analysis_runs sar ON sar.id = spm.run_id
+        JOIN app_versions av ON av.id = sar.app_version_id
+        JOIN apps a ON a.id = av.app_id
+        LEFT JOIN static_permission_risk_vnext v
+          ON v.run_id = spm.run_id
+         AND v.permission_name = LOWER(spm.permission_name) COLLATE utf8mb4_general_ci
+        WHERE sar.is_canonical = 1
+          AND UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
+          AND (
+                INSTR(spm.flags, '"background_permission"') > 0
+             OR INSTR(spm.flags, 'HEALTH') > 0
+             OR v.rationale_code IN (
+                    'BACKGROUND_SENSITIVE_PERMISSION',
+                    'HEALTH_DATA_PERMISSION'
+                )
+          )
+        ORDER BY sar.id DESC, spm.severity DESC
+        LIMIT 25
+        """,
+        fetch="all",
+        dictionary=True,
+    )
+
+    print()
+    menu_utils.print_section("Permission Intel matrix classifications")
+    menu_utils.print_hint(
+        "New scans persist group/background/authority in matrix flags. "
+        "Historical rows stay empty until those packages are re-analyzed."
+    )
+    if coverage:
+        menu_utils.print_metrics(
+            [
+                ("Matrix rows", int(coverage.get("matrix_rows") or 0)),
+                ("With group", int(coverage.get("with_group") or 0)),
+                ("With background", int(coverage.get("with_background") or 0)),
+                ("With authority", int(coverage.get("with_authority") or 0)),
+                ("With feature", int(coverage.get("with_feature") or 0)),
+            ]
+        )
+    print()
+    if rationale_rows:
+        table_utils.render_table(
+            ["vnext rationale", "Rows"],
+            [
+                [str(row.get("rationale_code") or "—"), str(row.get("cnt") or 0)]
+                for row in rationale_rows
+            ],
+        )
+    else:
+        print(status_messages.status("No static_permission_risk_vnext rows.", level="info"))
+    print()
+    if sample_rows:
+        table_utils.render_table(
+            ["Package", "Permission", "Sev", "Class", "Rationale"],
+            [
+                [
+                    str(row.get("package_name") or "—"),
+                    str(row.get("permission_name") or "—"),
+                    str(row.get("severity") or 0),
+                    str(row.get("risk_class") or "—"),
+                    str(row.get("rationale_code") or "—"),
+                ]
+                for row in sample_rows
+            ],
+        )
+    else:
+        print(
+            status_messages.status(
+                "No completed canonical rows with health/background classifications yet.",
+                level="info",
+            )
+        )
     prompt_utils.press_enter_to_continue()
 
 
@@ -1166,8 +1278,9 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
     if audit.is_orphan:
         print(
             status_messages.status(
-                "Orphan static run (legacy `runs` mirror row missing for session linkage).",
-                level="warn",
+                "Legacy `runs` mirror id is absent; session linkage uses static_analysis_runs / "
+                "static_session_run_links.",
+                level="info",
             )
         )
 
@@ -1302,7 +1415,12 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
         else:
             status_line = f"DB verification: OK (group session; session={resolved})"
     elif audit.run_id is None:
-        status_line = "DB verification: SKIPPED (run_id missing)"
+        if audit.static_run_id is not None:
+            status_line = (
+                f"DB verification: OK (canonical tables populated for static_run_id={audit.static_run_id})"
+            )
+        else:
+            status_line = "DB verification: SKIPPED (run_id missing)"
     elif missing:
         status_line = f"DB verification: ERROR (missing {', '.join(sorted(missing))} for static_run_id={audit.static_run_id})"
     else:

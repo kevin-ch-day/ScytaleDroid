@@ -50,7 +50,7 @@ ON DUPLICATE KEY UPDATE
     signer_fingerprint = COALESCE(VALUES(signer_fingerprint), signer_fingerprint),
     device_serial = VALUES(device_serial),
     harvested_at = COALESCE(VALUES(harvested_at), harvested_at),
-    is_split_member = GREATEST(is_split_member, VALUES(is_split_member)),
+    is_split_member = VALUES(is_split_member),
     split_group_id = COALESCE(VALUES(split_group_id), split_group_id),
     updated_at = CURRENT_TIMESTAMP
 """
@@ -59,6 +59,15 @@ SELECT_APK_ID_BY_SHA256 = """
 SELECT apk_id
 FROM android_apk_repository
 WHERE sha256 = %s
+LIMIT 1
+"""
+
+SELECT_APK_ID_BY_PACKAGE_SHA256 = """
+SELECT apk_id
+FROM android_apk_repository
+WHERE sha256 = %s
+  AND package_name = %s
+ORDER BY apk_id DESC
 LIMIT 1
 """
 
@@ -119,7 +128,10 @@ ON DUPLICATE KEY UPDATE
 UPDATE_APK_SPLIT_GROUP_TEMPLATE = """
 UPDATE android_apk_repository
 SET split_group_id = %s,
-    is_split_member = 1,
+    is_split_member = CASE
+        WHEN LOWER(file_name) = 'base.apk' OR LOWER(file_name) LIKE '%__base.apk' THEN 0
+        ELSE 1
+    END,
     updated_at = CURRENT_TIMESTAMP
 WHERE apk_id IN ({placeholders})
 """
@@ -155,7 +167,13 @@ UPSERT_APP_DEFINITION = """
 INSERT INTO apps (package_name, display_name)
 VALUES (%s, %s)
 ON DUPLICATE KEY UPDATE
-    display_name = COALESCE(VALUES(display_name), display_name),
+    display_name = CASE
+        WHEN display_name IS NULL
+          OR TRIM(display_name) = ''
+          OR LOWER(TRIM(display_name)) = LOWER(package_name)
+        THEN VALUES(display_name)
+        ELSE display_name
+    END,
     updated_at = CURRENT_TIMESTAMP
 """
 

@@ -27,6 +27,15 @@ def maybe_str(value: object) -> str | None:
     return text or None
 
 
+def _usable_app_label(package_name: str, label: str | None) -> str | None:
+    cleaned = maybe_str(label)
+    if not cleaned:
+        return None
+    if cleaned.lower() == package_name.strip().lower():
+        return None
+    return cleaned
+
+
 def load_app_names(package_names: Sequence[str]) -> dict[str, str]:
     # DB is optional/mirror-only for harvest scope selection. Do not import DB modules
     # at module import time; clean machines may not have DB deps installed.
@@ -46,7 +55,7 @@ def load_app_names(package_names: Sequence[str]) -> dict[str, str]:
             rows = []
         for row in rows or []:
             pkg = maybe_str(row.get("package_name"))
-            label = maybe_str(row.get("display_name"))
+            label = _usable_app_label(pkg or "", maybe_str(row.get("display_name")))
             if pkg and label:
                 _APP_NAME_CACHE[pkg] = label
     return {name: _APP_NAME_CACHE.get(name) for name in package_names if name in _APP_NAME_CACHE}
@@ -54,6 +63,9 @@ def load_app_names(package_names: Sequence[str]) -> dict[str, str]:
 
 def build_inventory_rows(packages: Sequence[dict[str, object]]) -> list[InventoryRow]:
     """Normalise raw inventory package dictionaries into ``InventoryRow`` entries."""
+
+    from scytaledroid.DeviceAnalysis import package_profiles
+    from scytaledroid.DeviceAnalysis.inventory.normalizer import derive_inventory_category
 
     rows: list[InventoryRow] = []
     package_names: list[str] = []
@@ -74,20 +86,29 @@ def build_inventory_rows(packages: Sequence[dict[str, object]]) -> list[Inventor
             if str(path).strip()
         ]
         split_count = int(pkg.get("split_count") or len(apk_paths) or 0)
-        app_label = maybe_str(pkg.get("app_label")) or app_names.get(package_name)
+        app_label = _usable_app_label(package_name, maybe_str(pkg.get("app_label"))) or app_names.get(
+            package_name
+        )
+        primary_path = maybe_str(pkg.get("primary_path"))
+        category = maybe_str(pkg.get("category")) or derive_inventory_category(primary_path)
         profile_key = _normalize_profile_key(
             maybe_str(pkg.get("profile_key") or pkg.get("profile_id")),
             maybe_str(pkg.get("profile_name")),
         )
         profile_name = maybe_str(pkg.get("profile_name")) or profile_key
+        if (profile_key or "").upper() in {"", "UNCLASSIFIED", "UNKNOWN"}:
+            heuristic = package_profiles.lookup_profile(package_name)
+            if heuristic:
+                profile_key = heuristic.id.upper()
+                profile_name = heuristic.name
         rows.append(
             InventoryRow(
                 raw=dict(pkg),
                 package_name=package_name,
                 app_label=app_label,
                 installer=maybe_str(pkg.get("installer")),
-                category=maybe_str(pkg.get("category")),
-                primary_path=maybe_str(pkg.get("primary_path")),
+                category=category,
+                primary_path=primary_path,
                 profile_key=profile_key,
                 profile=profile_name,
                 version_name=maybe_str(pkg.get("version_name")),

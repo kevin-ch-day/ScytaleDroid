@@ -431,7 +431,8 @@ def collect_static_run_counts(
             return None
 
         is_group_scope = derived_package is None
-        is_orphan = bool(derived_package and resolved_run_id is None)
+        # Missing legacy ``runs.run_id`` is normal under canonical persist.
+        is_orphan = False
         static_run_ids: list[int] = []
         if resolved_session:
             try:
@@ -489,23 +490,7 @@ def collect_static_run_counts(
                 )
                 severity_rows = [(pkg, sev, int(cnt)) for pkg, sev, cnt in cur.fetchall()]
             else:
-                findings_cols = _fetch_columns(cur, "findings")
-                if "static_run_id" not in findings_cols or resolved_static_run_id is None:
-                    raise RuntimeError("legacy findings unavailable")
-                cur.execute(
-                    """
-                    SELECT a.package_name, f.severity, COUNT(*) as cnt
-                    FROM findings f
-                    JOIN static_analysis_runs r ON r.id = f.static_run_id
-                    JOIN app_versions av ON av.id = r.app_version_id
-                    JOIN apps a ON a.id = av.app_id
-                    WHERE f.static_run_id=%s
-                    GROUP BY a.package_name, f.severity
-                    ORDER BY a.package_name, f.severity
-                    """,
-                    (resolved_static_run_id,),
-                )
-                severity_rows = [(pkg, sev, int(cnt)) for pkg, sev, cnt in cur.fetchall()]
+                severity_rows = []
         except Exception:
             severity_rows = []
 
@@ -548,16 +533,16 @@ def audit_run(session_stamp: str | None, run_id: int | None) -> int:
     if audit.is_group_scope:
         print(f"Note: {GROUP_SCOPE_VERIFICATION_GUIDANCE}")
     if audit.is_orphan:
-        print("Note: ORPHAN static run (runs row missing).")
+        print(
+            "Note: legacy `runs` mirror id is absent; canonical static_analysis_runs "
+            f"id={audit.static_run_id} remains the session identity."
+        )
     if audit.status:
         print(f"Status: {audit.status}")
 
     required_single = {
-        "findings",
         "static_string_summary",
         "static_string_samples",
-        "buckets",
-        "metrics",
         "permission_audit_snapshots",
         "permission_audit_apps",
     }
@@ -648,12 +633,9 @@ def audit_run(session_stamp: str | None, run_id: int | None) -> int:
         print("\nDB verification: OK (group session)")
         return 0
 
-    if missing and audit.run_id is not None:
+    if missing:
         print("\nDB verification: ERROR (missing: " + ", ".join(sorted(missing)) + ")")
         return 2
-    if audit.run_id is None:
-        print("\nDB verification: SKIPPED (run_id missing)")
-        return 0
     print("\nDB verification: OK (canonical tables populated)")
     return 0
 

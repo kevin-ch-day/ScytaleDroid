@@ -20,8 +20,8 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 _DEP_VIEW_NAME = "v_dep_static_profile"
 
 # Optional DEP view sources (presence via ``diagnostics.check_required_tables``).
+# Legacy ``metrics`` is not a DEP source — export columns stay NULL stubs.
 _DEP_OPTIONAL_SOURCES: tuple[str, ...] = (
-    "metrics",
     "masvs_control_coverage",
     "static_permission_matrix",
     "risk_scores",
@@ -83,21 +83,9 @@ def _drop_stale_dep_object() -> None:
     core_q.run_sql(f"DROP VIEW IF EXISTS {quoted}")
 
 
-def _metrics_join(presence: Mapping[str, bool]) -> str:
-    if presence.get("metrics"):
-        return """
-LEFT JOIN (
-  SELECT
-    run_id,
-    MAX(CASE WHEN feature_key = 'exports.total' THEN value_num ELSE NULL END) AS exports_total,
-    MAX(CASE WHEN feature_key = 'exports.activities' THEN value_num ELSE NULL END) AS exports_activities,
-    MAX(CASE WHEN feature_key = 'exports.services' THEN value_num ELSE NULL END) AS exports_services,
-    MAX(CASE WHEN feature_key = 'exports.receivers' THEN value_num ELSE NULL END) AS exports_receivers,
-    MAX(CASE WHEN feature_key = 'exports.providers' THEN value_num ELSE NULL END) AS exports_providers
-  FROM metrics
-  GROUP BY run_id
-) mtr ON mtr.run_id = sar.id
-"""
+def _metrics_join(_presence: Mapping[str, bool]) -> str:
+    # Export counts used to come from the legacy ``metrics`` mirror. Canonical
+    # persist no longer writes that table; keep the columns as a stable NULL stub.
     return """
 LEFT JOIN (
   SELECT NULL AS run_id,

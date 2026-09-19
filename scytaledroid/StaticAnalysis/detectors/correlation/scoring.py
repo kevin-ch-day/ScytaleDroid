@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 
 from ...core.context import DetectorContext
 from ...core.findings import Badge, Finding, MasvsCategory, SeverityLevel
+from ...modules.permissions.analysis.curves import saturating_response
 from .models import NetworkDiff, NetworkSnapshot
 
 
@@ -75,10 +76,11 @@ def risk_score(
         else 0
     )
     dangerous_perm_count = len(context.permissions.dangerous)
-    component_score = open_components * (12 + min(dangerous_perm_count, 12))
+    component_rate = 12 + min(dangerous_perm_count, 12)
+    component_score = int(round(saturating_response(open_components, component_rate, 80)))
     if shared_user:
         component_score += 25
-    component_score += provider_risky * 18
+    component_score += int(round(saturating_response(provider_risky, 18, 54)))
 
     network_metrics = metrics_map.get("network_surface", {})
     http_count = 0
@@ -90,14 +92,19 @@ def risk_score(
             http_count = int(counts.get("http", 0))
             https_count = int(counts.get("https", 0))
 
-    network_score = http_count * 15 + https_count * 3
+    network_score = int(
+        round(
+            saturating_response(http_count, 15, 60)
+            + saturating_response(https_count, 3, 24)
+        )
+    )
     if context.manifest_flags.uses_cleartext_traffic:
         network_score += 20
-    network_score += len(current_snapshot.cleartext_domains) * 10
+    network_score += int(round(saturating_response(len(current_snapshot.cleartext_domains), 10, 40)))
     if network_diff.cleartext_flip and network_diff.cleartext_flip[1] is True:
         network_score += 30
-    network_score += len(network_diff.cleartext_domains_added) * 12
-    network_score += len(network_diff.pinning_removed) * 15
+    network_score += int(round(saturating_response(len(network_diff.cleartext_domains_added), 12, 36)))
+    network_score += int(round(saturating_response(len(network_diff.pinning_removed), 15, 45)))
     if network_diff.user_certs_flip and network_diff.user_certs_flip[1] is True:
         network_score += 8
     if isinstance(network_metrics.get("NSC"), Mapping):
@@ -108,7 +115,7 @@ def risk_score(
     split_http_union = split_metrics.get("union_http_hosts")
     if isinstance(split_http_union, Sequence):
         extra_http = max(0, len(split_http_union) - len(current_snapshot.http_hosts))
-        network_score += extra_http * 9
+        network_score += int(round(saturating_response(extra_http, 9, 36)))
 
     secret_metrics = metrics_map.get("secrets_credentials", {})
     secret_count = 0
@@ -116,7 +123,7 @@ def risk_score(
         for data in secret_metrics["secret_types"].values():  # type: ignore[index]
             if isinstance(data, Mapping):
                 secret_count += int(data.get("found", 0))
-    secret_score = secret_count * 18
+    secret_score = int(round(saturating_response(secret_count, 18, 72)))
 
     storage_metrics = metrics_map.get("storage_backup", {})
     storage_score = 0
@@ -124,7 +131,7 @@ def risk_score(
         storage_score += 15
     if storage_metrics.get("legacy_external_storage"):
         storage_score += 12
-    storage_score += int(storage_metrics.get("sensitive_keys", 0)) * 4
+    storage_score += int(round(saturating_response(int(storage_metrics.get("sensitive_keys", 0)), 4, 24)))
 
     crypto_metrics = metrics_map.get("crypto_hygiene", {})
     crypto_score = (
@@ -140,11 +147,11 @@ def risk_score(
     if isinstance(union_exported, Mapping):
         split_total = sum(len(values) for values in union_exported.values())
         split_extra = max(0, split_total - context.exported_components.total())
-        split_score += split_extra * 6
+        split_score += int(round(saturating_response(split_extra, 6, 36)))
     union_cleartext = split_metrics.get("union_cleartext_domains")
     if isinstance(union_cleartext, Sequence):
         extra_cleartext = max(0, len(union_cleartext) - len(current_snapshot.cleartext_domains))
-        split_score += extra_cleartext * 8
+        split_score += int(round(saturating_response(extra_cleartext, 8, 32)))
 
     finding_score = sum(
         finding_weight(finding)

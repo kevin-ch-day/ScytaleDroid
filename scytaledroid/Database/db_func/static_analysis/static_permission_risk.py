@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
-from ...db_core import db_config, run_sql
+from ...db_core import db_config, run_sql, run_sql_many
 
 _ENGINE = str(db_config.DB_CONFIG.get("engine", "")).strip().lower()
 _IS_SQLITE = _ENGINE == "sqlite"
@@ -83,24 +83,61 @@ def ensure_table_vnext() -> bool:
         return False
 
 
+UPSERT_VNEXT_MYSQL = """
+INSERT INTO static_permission_risk_vnext (
+  run_id, permission_name, risk_score, risk_class, rationale_code
+) VALUES (
+  %s, %s, %s, %s, %s
+)
+ON DUPLICATE KEY UPDATE
+  risk_score = VALUES(risk_score),
+  risk_class = VALUES(risk_class),
+  rationale_code = VALUES(rationale_code),
+  created_at_utc = CURRENT_TIMESTAMP
+"""
+
+UPSERT_VNEXT_MYSQL_NAMED = """
+INSERT INTO static_permission_risk_vnext (
+  run_id, permission_name, risk_score, risk_class, rationale_code
+) VALUES (
+  %(run_id)s, %(permission_name)s, %(risk_score)s, %(risk_class)s, %(rationale_code)s
+)
+ON DUPLICATE KEY UPDATE
+  risk_score = VALUES(risk_score),
+  risk_class = VALUES(risk_class),
+  rationale_code = VALUES(rationale_code),
+  created_at_utc = CURRENT_TIMESTAMP
+"""
+
+
 def upsert_vnext(payload: Mapping[str, object]) -> None:
     if _IS_SQLITE:
         run_sql(SQLITE_UPSERT_VNEXT, payload)
         return
-    run_sql(
-        """
-        INSERT INTO static_permission_risk_vnext (
-          run_id, permission_name, risk_score, risk_class, rationale_code
-        ) VALUES (
-          %(run_id)s, %(permission_name)s, %(risk_score)s, %(risk_class)s, %(rationale_code)s
-        )
-        ON DUPLICATE KEY UPDATE
-          risk_score = VALUES(risk_score),
-          risk_class = VALUES(risk_class),
-          rationale_code = VALUES(rationale_code),
-          created_at_utc = CURRENT_TIMESTAMP
-        """,
-        payload,
+    run_sql(UPSERT_VNEXT_MYSQL_NAMED, payload)
+
+
+def upsert_vnext_many(payloads: Iterable[Mapping[str, object]]) -> None:
+    rows = [dict(payload) for payload in payloads]
+    if not rows:
+        return
+    if _IS_SQLITE or len(rows) == 1:
+        for payload in rows:
+            upsert_vnext(payload)
+        return
+    run_sql_many(
+        UPSERT_VNEXT_MYSQL,
+        [
+            (
+                payload["run_id"],
+                payload["permission_name"],
+                payload["risk_score"],
+                payload.get("risk_class"),
+                payload.get("rationale_code"),
+            )
+            for payload in rows
+        ],
+        query_name="static_permission_risk.upsert_vnext_many",
     )
 
 
@@ -108,4 +145,5 @@ __all__ = [
     "ensure_table_vnext",
     "table_exists_vnext",
     "upsert_vnext",
+    "upsert_vnext_many",
 ]

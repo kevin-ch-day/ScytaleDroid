@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from scytaledroid.DeviceAnalysis.identity import is_base_artifact
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -81,11 +82,33 @@ class RepositoryArtifact:
 
     @property
     def is_split_member(self) -> bool:
-        value = self.metadata.get("is_split_member")
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
+        file_name = str(self.metadata.get("file_name") or self.path.name)
+        split_label = str(
+            self.metadata.get("artifact")
+            or self.metadata.get("split_name")
+            or self.metadata.get("split_label")
+            or ""
+        )
+        explicit_base = self.metadata.get("is_base")
+        explicit_split = self.metadata.get("is_split_member")
+        if explicit_base is not None:
+            is_base_flag: object = explicit_base
+        elif isinstance(explicit_split, bool):
+            is_base_flag = not explicit_split
+        elif isinstance(explicit_split, (int, float)):
+            is_base_flag = not bool(explicit_split)
+        else:
+            is_base_flag = None
+        if is_base_artifact(
+            is_base=is_base_flag,
+            file_name=file_name,
+            split_label=split_label,
+        ):
+            return False
+        if isinstance(explicit_split, bool):
+            return explicit_split
+        if isinstance(explicit_split, (int, float)):
+            return bool(explicit_split)
         return False
 
     @property
@@ -404,7 +427,14 @@ def _artifacts_from_receipt(receipt_path: Path, payload: Mapping[str, object]) -
         metadata.setdefault("sha256", entry.get("sha256"))
         metadata.setdefault("artifact", entry.get("split_label") or entry.get("file_name"))
         metadata.setdefault("artifact_kind", "apk")
-        metadata.setdefault("is_split_member", not bool(entry.get("is_base")))
+        metadata.setdefault(
+            "is_split_member",
+            not is_base_artifact(
+                is_base=entry.get("is_base"),
+                file_name=str(entry.get("file_name") or resolved_path.name),
+                split_label=str(entry.get("split_label") or ""),
+            ),
+        )
         metadata.setdefault("observed_source_path", entry.get("observed_source_path"))
         metadata.setdefault("source_path", entry.get("observed_source_path"))
         metadata.setdefault("session_stamp", session_stamp or None)
@@ -838,7 +868,7 @@ def load_display_name_map(groups: Sequence[ArtifactGroup]) -> dict[str, str]:
     for row in rows or []:
         pkg = str(row.get("package_name") or "").strip().lower()
         label = str(row.get("display_name") or "").strip()
-        if pkg and label:
+        if pkg and label and label.lower() != pkg:
             display_map[pkg] = label
     return display_map
 

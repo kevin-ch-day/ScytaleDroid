@@ -292,7 +292,7 @@ LIMIT 1
 SELECT_EXISTING_APK_SET_IDENTITY = """
 SELECT apk_set_id, artifact_set_hash, artifact_set_hash_version
 FROM apk_sets
-WHERE LOWER(TRIM(artifact_set_hash)) IN (%s, %s)
+WHERE artifact_set_hash IN (%s, %s)
 ORDER BY
   CASE WHEN artifact_set_hash_version = 'v1' THEN 0 ELSE 1 END,
   apk_set_id

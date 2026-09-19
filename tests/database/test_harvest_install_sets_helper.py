@@ -177,3 +177,55 @@ def test_upsert_install_set_reuses_stored_v2_identity(monkeypatch) -> None:
     assert apk_set_id == 9001
     assert captured["set_params"][7] == stored_v2
     assert captured["set_params"][8] == V2
+
+
+def test_upsert_install_set_fills_missing_apk_id_from_sha256(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    lookups: list[tuple[str, tuple]] = []
+
+    def _run_sql(_sql, params=(), **kwargs):
+        query_name = str(kwargs.get("query_name") or "")
+        if "lookup_apk_id_by_package" in query_name:
+            lookups.append((query_name, tuple(params)))
+            return (31400,)
+        if "lookup_existing_identity" in query_name:
+            return None
+        if "lookup_app_version" in query_name:
+            return {}
+        if "upsert_session" in query_name:
+            return 1
+        if "upsert_set" in query_name:
+            captured["set_params"] = params
+            return 11
+        if "upsert_member" in query_name:
+            captured.setdefault("member_params", []).append(params)
+            return None
+        return None
+
+    monkeypatch.setattr(install_sets, "ensure_tables", lambda: None)
+    monkeypatch.setattr(install_sets, "run_sql", _run_sql)
+
+    record = _record(
+        members=(
+            install_sets.InstallSetMember(
+                apk_id=None,
+                role="base",
+                split_name="base",
+                sha256="b" * 64,
+            ),
+        )
+    )
+    apk_set_id = install_sets.upsert_install_set(record)
+
+    assert apk_set_id == 11
+    assert lookups == [("harvest.install_sets.lookup_apk_id_by_package", ("b" * 64, "com.example"))]
+    assert captured["set_params"][5] == 31400
+    assert captured["member_params"][0][1] == 31400
+
+
+def test_existing_apk_set_identity_sql_uses_ascii_hash_equality() -> None:
+    from scytaledroid.Database.db_queries.harvest import install_sets as install_set_sql
+
+    sql = install_set_sql.SELECT_EXISTING_APK_SET_IDENTITY
+    assert "artifact_set_hash IN (%s, %s)" in sql
+    assert "LOWER(TRIM(artifact_set_hash))" not in sql

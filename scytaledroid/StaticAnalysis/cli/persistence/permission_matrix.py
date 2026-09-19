@@ -35,15 +35,15 @@ def _coerce_source(permission: str) -> str:
     return namespace or "custom"
 
 
-def _catalog_guardStrength(permission: str) -> str | None:
+def _catalog_descriptor(permission: str, catalog=None):
     try:
-        catalog = load_permission_catalog()
-        descriptor = catalog.describe(permission)
-        if descriptor is None:
-            return None
-        return descriptor.guard_strength()
+        active = catalog if catalog is not None else load_permission_catalog()
+        return active.describe(permission)
     except Exception as exc:  # pragma: no cover - defensive
-        log.debug(f"Permission catalog lookup failed for {permission}: {exc}", category="static_analysis")
+        log.debug(
+            f"Permission catalog lookup failed for {permission}: {exc}",
+            category="static_analysis",
+        )
         return None
 
 
@@ -78,6 +78,25 @@ def persist_permission_matrix(
         matrix_db.replace_for_run(int(static_run_id), ())
         return
 
+    catalog = None
+    catalog_unavailable = False
+
+    def _descriptor(permission: str):
+        nonlocal catalog, catalog_unavailable
+        if catalog_unavailable:
+            return None
+        if catalog is None:
+            try:
+                catalog = load_permission_catalog()
+            except Exception as exc:  # pragma: no cover - defensive
+                catalog_unavailable = True
+                log.debug(
+                    f"Permission catalog lookup failed for {permission}: {exc}",
+                    category="static_analysis",
+                )
+                return None
+        return _catalog_descriptor(permission, catalog)
+
     rows: list[dict[str, object]] = []
     seen_canonical: set[str] = set()
     for name, profile in permission_profiles.items():
@@ -103,13 +122,48 @@ def persist_permission_matrix(
                 token_payload = tokens
 
             guard_strength = profile.get("guard_strength")
-            if guard_strength is None:
-                guard_strength = _catalog_guardStrength(raw_perm)
+            catalog_source = profile.get("catalog_source") if isinstance(profile, Mapping) else None
+            protection_levels = profile.get("protection_levels") if isinstance(profile, Mapping) else None
+            protection = profile.get("protection") if isinstance(profile, Mapping) else None
+            group = profile.get("group") if isinstance(profile, Mapping) else None
+            background_permission = (
+                profile.get("background_permission") if isinstance(profile, Mapping) else None
+            )
+            authority_class = profile.get("authority_class") if isinstance(profile, Mapping) else None
+            feature_dependency = (
+                profile.get("feature_dependency") if isinstance(profile, Mapping) else None
+            )
+            descriptor = None
+            if (
+                guard_strength is None
+                or not catalog_source
+                or not protection_levels
+                or not protection
+                or not group
+                or not background_permission
+                or not authority_class
+                or not feature_dependency
+            ):
+                descriptor = _descriptor(raw_perm)
+            if guard_strength is None and descriptor is not None:
+                guard_strength = descriptor.guard_strength()
+            if not catalog_source and descriptor is not None:
+                catalog_source = descriptor.source
+            if not protection_levels and descriptor is not None and descriptor.protection:
+                protection_levels = list(descriptor.protection)
+            if not protection and descriptor is not None and descriptor.protection:
+                protection = "|".join(descriptor.protection)
+            if not group and descriptor is not None:
+                group = descriptor.permission_group
+            if not background_permission and descriptor is not None:
+                background_permission = descriptor.background_permission
+            if not authority_class and descriptor is not None:
+                authority_class = descriptor.authority_class
+            if not feature_dependency and descriptor is not None:
+                feature_dependency = descriptor.feature_dependency
 
             declared_in = profile.get("declared_in") if isinstance(profile, Mapping) else None
 
-            catalog_source = profile.get("catalog_source") if isinstance(profile, Mapping) else None
-            protection_levels = profile.get("protection_levels") if isinstance(profile, Mapping) else None
             extra_only: dict[str, object] = {}
             if catalog_source:
                 extra_only["catalog_source"] = catalog_source
@@ -118,6 +172,14 @@ def persist_permission_matrix(
                     extra_only["protection_levels"] = list(protection_levels)
                 else:
                     extra_only["protection_levels"] = protection_levels
+            if group:
+                extra_only["permission_group"] = group
+            if background_permission:
+                extra_only["background_permission"] = background_permission
+            if authority_class:
+                extra_only["authority_class"] = authority_class
+            if feature_dependency:
+                extra_only["feature_dependency"] = feature_dependency
             flags = json.dumps(extra_only, default=str) if extra_only else None
 
             severity = profile.get("severity") if isinstance(profile, Mapping) else 0
@@ -134,7 +196,7 @@ def persist_permission_matrix(
                 "package_name": package_name,
                 "permission_name": raw_perm,
                 "source": profile.get("source") if isinstance(profile, Mapping) else _coerce_source(raw_perm),
-                "protection": profile.get("protection") if isinstance(profile, Mapping) else None,
+                "protection": protection,
                 "guard_strength": guard_strength,
                 "declared_in": declared_in,
                 "tokens": token_payload,

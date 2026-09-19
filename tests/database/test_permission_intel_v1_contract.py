@@ -30,7 +30,7 @@ def test_queue_submission_requires_source_identity() -> None:
         )
 
 
-def test_v1_lookup_is_binary_and_shadow_only(monkeypatch) -> None:
+def test_v1_lookup_is_binary_and_uses_deployed_views(monkeypatch) -> None:
     calls: list[str] = []
     params_seen: list[object] = []
 
@@ -56,21 +56,22 @@ def test_v1_lookup_is_binary_and_shadow_only(monkeypatch) -> None:
         return [
             {
                 "canonical_permission": "android.permission.INTERNET",
-                "interpretation_contract_version": "1.1.0-draft",
-                "declaration_state": "SINGLE_UNCONDITIONAL_DECLARATION",
-                "protection_state": "DECLARED_IN_ACCEPTED_SOURCE_SCOPE",
+                "compatibility_protection_expression": "normal",
+                "protection_base": "normal",
             }
         ]
 
     monkeypatch.setattr(permission_intel, "run_sql", fake_run_sql)
     rows = permission_intel.fetch_v1_permission_rows(["android.permission.INTERNET"])
-    assert rows[0]["reference_mode"] == "SHADOW_READ_ONLY"
+    assert rows[0]["reference_mode"] == permission_intel.V1_REFERENCE_MODE
     assert rows[0]["scope_complete"] is False
-    assert "android_permission_v1_1_scytaledroid_permission" in calls[1]
-    assert "BINARY canonical_permission IN" in calls[1]
+    assert permission_intel.V1_SCYTALEDROID_PERMISSION_VIEW in calls[1]
+    assert permission_intel.V1_CURRENT_PERMISSION_VIEW in calls[1]
+    assert "android_permission_v1_1_" not in calls[1]
+    assert "BINARY sp.canonical_permission IN" in calls[1]
     assert "authority_class IN" in calls[1]
     assert "'AOSP_HIDDEN'" in calls[1]
-    assert "catalog_release_id = %s" in calls[1]
+    assert "sp.catalog_release_id = %s" in calls[1]
     assert params_seen[1] == (
         "android.permission.INTERNET",
         "release",
@@ -118,6 +119,11 @@ def test_v1_full_catalog_is_limited_to_accepted_aosp_authorities(monkeypatch) ->
     permission_intel.fetch_v1_permission_catalog_rows()
 
     assert "'AOSP_PUBLIC', 'AOSP_HIDDEN', 'AOSP_INTERNAL', 'AOSP_MODULE'" in calls[1]
+    assert permission_intel.V1_SCYTALEDROID_PERMISSION_VIEW in calls[1]
+    assert "android_permission_v1_1_" not in calls[1]
+    assert "ORDER BY BINARY" not in calls[1]
+    assert "BINARY p.canonical_permission" not in calls[1]
+    assert "p.canonical_permission = sp.canonical_permission" in calls[1]
     assert params_seen[1] == ("release", "a" * 64)
 
 
@@ -147,6 +153,14 @@ def test_v1_gate_rejects_schema_version_drift(monkeypatch) -> None:
     )
     with pytest.raises(RuntimeError, match="version interval"):
         permission_intel.fetch_v1_catalog_gate()
+
+
+def test_interpretation_surfaces_are_tracked_and_not_freeze_targets() -> None:
+    assert permission_intel.V1_SCYTALEDROID_PERMISSION_VIEW in permission_intel.INTERPRETATION_SURFACES
+    assert permission_intel.V1_CURRENT_PERMISSION_VIEW in permission_intel.INTERPRETATION_SURFACES
+    assert "android_permission_v1_1_scytaledroid_permission" not in permission_intel.INTERPRETATION_SURFACES
+    overlap = set(permission_intel.INTERPRETATION_SURFACES) & set(permission_intel.MANAGED_TABLES)
+    assert overlap == set()
 
 
 def test_scytale_permission_intel_never_writes_obs_sample() -> None:

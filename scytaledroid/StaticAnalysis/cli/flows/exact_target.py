@@ -610,8 +610,10 @@ def _lookup_repository_row(
         clauses.append("r.apk_id = %s")
         params.append(int(apk_id))
     if base_apk_sha256:
-        clauses.append("LOWER(TRIM(r.sha256)) = %s")
-        params.append(base_apk_sha256)
+        digest = _normalize_sha256(base_apk_sha256)
+        if digest:
+            clauses.append("r.sha256 = %s")
+            params.append(digest)
     package = _normalize_package(package_name)
     if package:
         clauses.append("LOWER(TRIM(r.package_name)) = %s")
@@ -1103,6 +1105,10 @@ def _lookup_unique_apk_set_identity(
     package_name: str,
     base_apk_sha256: str,
 ) -> dict[str, str] | None:
+    digest = str(base_apk_sha256 or "").strip().lower()
+    package = _normalize_package(package_name)
+    if not digest or not package:
+        return None
     if core_q is None:
         return None
     try:
@@ -1111,10 +1117,10 @@ def _lookup_unique_apk_set_identity(
             SELECT apk_set_id, package_name, base_apk_sha256,
                    artifact_set_hash, artifact_set_hash_version
             FROM apk_sets
-            WHERE LOWER(TRIM(base_apk_sha256)) = %s
+            WHERE base_apk_sha256 = %s
               AND LOWER(TRIM(package_name)) = %s
             """,
-            (base_apk_sha256, package_name),
+            (digest, package),
             fetch="all_dict",
             query_name="static.exact_target.lookup_apk_sets_for_base",
         )

@@ -11,7 +11,6 @@ def fetch_latest_run(run_sql) -> dict[str, Any] | None:
             """
             SELECT
               sar.id AS static_run_id,
-              legacy.legacy_run_id,
               a.package_name AS package_name,
               av.version_name,
               av.version_code,
@@ -22,12 +21,6 @@ def fetch_latest_run(run_sql) -> dict[str, Any] | None:
             FROM static_analysis_runs sar
             JOIN app_versions av ON av.id = sar.app_version_id
             JOIN apps a ON a.id = av.app_id
-            LEFT JOIN (
-              SELECT session_stamp, MAX(run_id) AS legacy_run_id
-              FROM runs
-              GROUP BY session_stamp
-            ) AS legacy
-              ON legacy.session_stamp = sar.session_stamp
             ORDER BY sar.id DESC
             LIMIT 1
             """,

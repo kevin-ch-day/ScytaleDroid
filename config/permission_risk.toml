@@ -1,8 +1,10 @@
 [meta]
-version = "1.2"
+version = "1.5"
 notes = [
-  "Risk is computed per permission then aggregated by app.",
-  "Weights reflect intrinsic sensitivity; modifiers tune based on evidence and environment."
+  "Per-permission impacts combine with the CVSS v3.1 ISS identity (noisy-OR), not a linear sum.",
+  "App-level counts use a CARA saturating exponential so extra permissions add less than the first.",
+  "Capability breadth uses [group_multipliers] then the same saturating curve (smooth tail damping).",
+  "Name regexes score Health Connect and background capture; process-control BACKGROUND names are excluded.",
 ]
 
 [weights]
@@ -22,6 +24,7 @@ sms_mms          = 1.15
 call_logs        = 1.15
 storage_legacy   = 1.10
 sensors_activity = 1.00
+health           = 1.25
 notifications    = 0.80
 bluetooth        = 0.95
 nearby_devices   = 0.90
@@ -77,24 +80,26 @@ sms_mms          = "high"
 call_logs        = "high"
 storage_legacy   = "high"
 sensors_activity = "medium"
+health           = "high"
 notifications    = "low"
 bluetooth        = "medium"
 nearby_devices   = "medium"
 
 # Phase 5 note:
-# The currently persisted run-level permission score still uses the simpler
-# weighted-count engine in `scytaledroid.StaticAnalysis.risk.permission`.
-# That engine reads only the sections below. The broader contract above remains
-# useful design guidance, but it is not yet the authoritative persisted scorer.
-#
-# These tuned values intentionally reduce score inflation from common Android
-# permission breadth and weak-guard pressure while we continue the richer
-# scoring-model overhaul.
+# The persisted run-level score uses
+# `scytaledroid.StaticAnalysis.risk.permission`. Count terms are saturating
+# exponentials; same-dimension permission impacts use CVSS ISS (noisy-OR).
+# [group_multipliers] weight capability breadth. Historical rows used a
+# linear-then-cap engine — re-score to compare. [aggregation] tail_damping
+# is superseded by the saturating exponential (no second piecewise kink).
 
 [base]
 dangerous_weight = 0.22
 signature_weight = 0.55
 vendor_weight    = 0.02
+dangerous_cap    = 6.50
+signature_cap    = 2.80
+vendor_cap       = 1.00
 
 [bonuses]
 breadth_step = 0.08
@@ -109,6 +114,16 @@ special_risk_normal_weight = 0.16
 special_risk_normal_cap    = 0.60
 weak_guard_weight     = 0.08
 weak_guard_cap        = 0.50
+background_sensitive_weight = 0.18
+background_sensitive_cap    = 0.54
+health_sensitive_weight     = 0.12
+health_sensitive_cap        = 0.60
+privileged_declared_weight  = 0.10
+privileged_declared_cap     = 0.40
+
+[interactions]
+background_capture_scale = 0.35
+health_background_scale  = 0.22
 
 [normalize]
 max_score = 10.0

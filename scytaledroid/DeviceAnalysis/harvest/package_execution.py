@@ -277,6 +277,7 @@ def _prepare_db_mirror(
             app_id = request.db_repo.ensure_app_definition(
                 package_name,
                 inventory.app_label,
+                category_name=inventory.category,
                 profile_key=inventory.profile_key,
                 context={**request.base_context, "package_name": package_name},
             )
