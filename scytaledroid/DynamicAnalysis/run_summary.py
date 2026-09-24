@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
 from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
     baseline_not_idle_next_step as _guidance_baseline_not_idle_next_step,
@@ -32,7 +33,10 @@ def print_run_summary(result, duration_label: str) -> None:
         ("Package", result.package_name or "unknown"),
         ("Run ID", result.dynamic_run_id or "unknown"),
         ("Run mode", duration_label),
-        ("Session wall-clock", format_seconds(duration_seconds) if duration_seconds is not None else "unknown"),
+        (
+            "Session wall-clock",
+            format_seconds(duration_seconds) if duration_seconds is not None else "unknown",
+        ),
         ("Status", status),
     ]
     if manifest:
@@ -55,7 +59,11 @@ def print_run_summary(result, duration_label: str) -> None:
             target_overrun = operator.get("script_target_overrun_s")
             if template_id:
                 lines.append(("Template", str(template_id)))
-            if template_requested and template_actual and str(template_requested) != str(template_actual):
+            if (
+                template_requested
+                and template_actual
+                and str(template_requested) != str(template_actual)
+            ):
                 lines.append(("Template requested", str(template_requested)))
                 lines.append(("Template actual", str(template_actual)))
             if protocol_version is not None:
@@ -110,7 +118,9 @@ def print_run_summary(result, duration_label: str) -> None:
                 lines.append(("Dataset flag", "no_traffic_observed=1"))
 
             # Operator-visible quota tracking (does not block extra runs).
-            pkg = (target.get("package_name") if isinstance(target, dict) else None) or result.package_name
+            pkg = (
+                target.get("package_name") if isinstance(target, dict) else None
+            ) or result.package_name
             quota = _dataset_quota_label(str(pkg) if pkg else None, result.dynamic_run_id)
             if quota:
                 lines.append(("Dataset quota", quota))
@@ -188,10 +198,14 @@ def print_run_summary(result, duration_label: str) -> None:
                     startup_share = _fmt_percent_ratio(startup_snapshot.get("startup_byte_share"))
                     if startup_share:
                         lines.append(("Startup byte share", startup_share))
-                    post_start_rate = _fmt_rate_per_min(startup_snapshot.get("post_start_median_bytes_per_min"))
+                    post_start_rate = _fmt_rate_per_min(
+                        startup_snapshot.get("post_start_median_bytes_per_min")
+                    )
                     if post_start_rate:
                         lines.append(("Post-start median", post_start_rate))
-                    if _is_x_quiet_tail_pattern(result.dynamic_run_id, pkg, startup_snapshot, validity):
+                    if _is_x_quiet_tail_pattern(
+                        result.dynamic_run_id, pkg, startup_snapshot, validity
+                    ):
                         lines.append(
                             (
                                 "Pattern hint",
@@ -362,7 +376,11 @@ def print_run_summary(result, duration_label: str) -> None:
     if status == "blocked":
         print(status_messages.status(_blocked_status_message(result, run_dir), level="blocked"))
     elif status != "success":
-        print(status_messages.status("Session marked as degraded. Check observer errors above.", level="warn"))
+        print(
+            status_messages.status(
+                "Session marked as degraded. Check observer errors above.", level="warn"
+            )
+        )
     if result.dynamic_run_id and result.evidence_path:
         print(
             status_messages.status(
@@ -370,6 +388,7 @@ def print_run_summary(result, duration_label: str) -> None:
                 level="info",
             )
         )
+
 
 def _append_call_metadata_lines(
     lines: list[tuple[str, str]],
@@ -407,9 +426,13 @@ def _append_call_metadata_lines(
     if operator.get("call_connected") is not None:
         lines.append(("Call connected", str(bool(operator.get("call_connected"))).lower()))
     if operator.get("call_connect_latency_s") is not None:
-        lines.append(("Call connect latency", f"{float(operator.get('call_connect_latency_s')):.2f}s"))
+        lines.append(
+            ("Call connect latency", f"{float(operator.get('call_connect_latency_s')):.2f}s")
+        )
     if operator.get("call_connected_duration_s") is not None:
-        lines.append(("Call connected duration", f"{float(operator.get('call_connected_duration_s')):.2f}s"))
+        lines.append(
+            ("Call connected duration", f"{float(operator.get('call_connected_duration_s')):.2f}s")
+        )
     if operator.get("call_end_reason"):
         lines.append(("Call end reason", str(operator.get("call_end_reason"))))
     if operator.get("call_outcome_reason"):
@@ -487,7 +510,13 @@ def _load_db_persistence_status(run_dir: Path | None) -> dict[str, object] | Non
     if not run_dir:
         return None
     # Preferred: derived, versioned index artifact (does not mutate the manifest).
-    payload = _load_json(run_dir / "analysis" / "index" / "v1" / "db_persistence_status.json")
+    payload = _load_json(
+        EvidencePackWriter(run_dir).derived_writer().run_dir
+        / "analysis"
+        / "index"
+        / "v1"
+        / "db_persistence_status.json"
+    )
     if isinstance(payload, dict):
         return payload
     # Backward compatibility: older manifests embedded env.db_persistence.
@@ -513,7 +542,9 @@ def _load_json(path: Path | None) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _load_latest_event_details(run_dir: Path | None, *, event_type: str) -> dict[str, object] | None:
+def _load_latest_event_details(
+    run_dir: Path | None, *, event_type: str
+) -> dict[str, object] | None:
     if not run_dir:
         return None
     events_path = run_dir / "notes" / "run_events.jsonl"
@@ -721,7 +752,9 @@ def _dataset_quota_label(package_name: str | None, dynamic_run_id: str | None) -
     if dynamic_run_id:
         runs = entry.get("runs")
         if isinstance(runs, list):
-            run = next((r for r in runs if isinstance(r, dict) and r.get("run_id") == dynamic_run_id), None)
+            run = next(
+                (r for r in runs if isinstance(r, dict) and r.get("run_id") == dynamic_run_id), None
+            )
             if isinstance(run, dict) and run.get("extra_run"):
                 label += " (extra_run=1)"
     return label
@@ -760,7 +793,11 @@ def _countability_detail(package_name: str | None, dynamic_run_id: str | None) -
         ds = run_manifest.get("dataset") if isinstance(run_manifest.get("dataset"), dict) else {}
         if isinstance(ds, dict) and low_signal is None and ds.get("low_signal") is not None:
             low_signal = bool(ds.get("low_signal"))
-        if isinstance(ds, dict) and baseline_not_idle is None and ds.get("baseline_not_idle") is not None:
+        if (
+            isinstance(ds, dict)
+            and baseline_not_idle is None
+            and ds.get("baseline_not_idle") is not None
+        ):
             baseline_not_idle = bool(ds.get("baseline_not_idle"))
     run_profile = str(run.get("run_profile") or "").strip().lower()
     if (
@@ -795,7 +832,9 @@ def _baseline_not_idle_reason_text(code: str) -> str:
     return mapping.get(str(code or "").strip().upper(), str(code or "").strip().upper())
 
 
-def _baseline_not_idle_reasons(dynamic_run_id: str | None, validity: dict[str, object] | None) -> list[str]:
+def _baseline_not_idle_reasons(
+    dynamic_run_id: str | None, validity: dict[str, object] | None
+) -> list[str]:
     reasons = _baseline_not_idle_reason_codes(dynamic_run_id, validity)
     out: list[str] = []
     for reason in reasons:
@@ -805,7 +844,9 @@ def _baseline_not_idle_reasons(dynamic_run_id: str | None, validity: dict[str, o
     return out
 
 
-def _non_idle_threshold_crossed(dynamic_run_id: str | None, validity: dict[str, object] | None) -> str | None:
+def _non_idle_threshold_crossed(
+    dynamic_run_id: str | None, validity: dict[str, object] | None
+) -> str | None:
     reasons: list[str] = []
     row = _tracker_run_row(dynamic_run_id)
     if isinstance(row, dict):
@@ -849,7 +890,9 @@ def _non_idle_metric_snapshot(run_dir: Path | None) -> dict[str, object]:
             if isinstance(cap, dict)
             else None
         ),
-        "p95_bytes_per_sec": metrics.get("bytes_per_second_p95") if isinstance(metrics, dict) else None,
+        "p95_bytes_per_sec": metrics.get("bytes_per_second_p95")
+        if isinstance(metrics, dict)
+        else None,
         "quic_ratio": proxies.get("quic_ratio") if isinstance(proxies, dict) else None,
     }
 
@@ -859,12 +902,18 @@ def _startup_profile_snapshot(run_dir: Path | None) -> dict[str, object]:
         return {}
     summary = _load_summary(run_dir) or {}
     capture = summary.get("capture") if isinstance(summary.get("capture"), dict) else {}
-    startup = capture.get("startup_profile") if isinstance(capture.get("startup_profile"), dict) else {}
+    startup = (
+        capture.get("startup_profile") if isinstance(capture.get("startup_profile"), dict) else {}
+    )
     if startup:
         return startup
     features = _load_json(run_dir / "analysis" / "pcap_features.json") or {}
-    startup_block = features.get("startup_profile") if isinstance(features.get("startup_profile"), dict) else {}
-    summary_block = startup_block.get("summary") if isinstance(startup_block.get("summary"), dict) else {}
+    startup_block = (
+        features.get("startup_profile") if isinstance(features.get("startup_profile"), dict) else {}
+    )
+    summary_block = (
+        startup_block.get("summary") if isinstance(startup_block.get("summary"), dict) else {}
+    )
     return summary_block if summary_block else {}
 
 
@@ -1110,7 +1159,9 @@ def _countability_label(validity: dict[str, object], run_profile: str | None) ->
     if validity.get("low_signal") is True and profile_lc == "baseline_idle":
         return "NO (LOW_SIGNAL_IDLE)"
     if validity.get("countable") is False:
-        exclusion_reason = str(validity.get("paper_exclusion_primary_reason_code") or "").strip().upper()
+        exclusion_reason = (
+            str(validity.get("paper_exclusion_primary_reason_code") or "").strip().upper()
+        )
         cohort_eligibility = str(validity.get("cohort_eligibility") or "").strip().upper()
         if exclusion_reason == "EXCLUDED_MANUAL_NON_COHORT":
             return "NO (manual exploratory)"
@@ -1169,7 +1220,9 @@ def _low_signal_reason_lines(
             duration = metrics.get("capture_duration_s")
             threshold = metrics.get("min_capture_duration_s")
             if duration is not None and threshold is not None:
-                label += f" ({format_seconds(float(duration))} < {format_seconds(float(threshold))})"
+                label += (
+                    f" ({format_seconds(float(duration))} < {format_seconds(float(threshold))})"
+                )
             labels.append(label)
         else:
             labels.append(code)
@@ -1182,8 +1235,16 @@ def _low_signal_metric_snapshot(
 ) -> dict[str, object]:
     features = _load_json(run_dir / "analysis" / "pcap_features.json") if run_dir else {}
     report = _load_json(run_dir / "analysis" / "pcap_report.json") if run_dir else {}
-    metrics = features.get("metrics") if isinstance(features, dict) and isinstance(features.get("metrics"), dict) else {}
-    proxies = features.get("proxies") if isinstance(features, dict) and isinstance(features.get("proxies"), dict) else {}
+    metrics = (
+        features.get("metrics")
+        if isinstance(features, dict) and isinstance(features.get("metrics"), dict)
+        else {}
+    )
+    proxies = (
+        features.get("proxies")
+        if isinstance(features, dict) and isinstance(features.get("proxies"), dict)
+        else {}
+    )
     cap = (
         (report.get("capinfos") or {}).get("parsed")
         if isinstance(report, dict) and isinstance(report.get("capinfos"), dict)
@@ -1240,7 +1301,9 @@ def _build_evidence_lines(
     capture_mode = capture_info.get("capture_mode")
     if pcap_valid is not None or pcap_size is not None or capture_mode:
         size_label = _format_bytes(int(pcap_size)) if isinstance(pcap_size, int) else "unknown size"
-        valid_label = "valid" if pcap_valid is True else "invalid" if pcap_valid is False else "unknown"
+        valid_label = (
+            "valid" if pcap_valid is True else "invalid" if pcap_valid is False else "unknown"
+        )
         mode_label = capture_mode or "unknown"
         lines.append(f"PCAP: {mode_label} | {size_label} | {valid_label}")
     else:
@@ -1421,10 +1484,22 @@ def _build_indicator_summary_lines(pcap_report: dict[str, object] | None) -> lis
         out.append(dns)
     if sni:
         out.append(sni)
-    media_plane = pcap_report.get("media_plane") if isinstance(pcap_report.get("media_plane"), dict) else {}
-    media_summary = media_plane.get("summary") if isinstance(media_plane.get("summary"), dict) else {}
-    dominant_udp = media_summary.get("dominant_udp_flow") if isinstance(media_summary.get("dominant_udp_flow"), dict) else {}
-    relay_endpoints = media_summary.get("relay_endpoints") if isinstance(media_summary.get("relay_endpoints"), list) else []
+    media_plane = (
+        pcap_report.get("media_plane") if isinstance(pcap_report.get("media_plane"), dict) else {}
+    )
+    media_summary = (
+        media_plane.get("summary") if isinstance(media_plane.get("summary"), dict) else {}
+    )
+    dominant_udp = (
+        media_summary.get("dominant_udp_flow")
+        if isinstance(media_summary.get("dominant_udp_flow"), dict)
+        else {}
+    )
+    relay_endpoints = (
+        media_summary.get("relay_endpoints")
+        if isinstance(media_summary.get("relay_endpoints"), list)
+        else []
+    )
     classification = str(media_summary.get("classification") or "").strip()
     if classification and classification != "not_observed":
         parts = [classification.replace("_", " ")]

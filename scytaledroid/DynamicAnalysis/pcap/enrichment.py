@@ -91,6 +91,12 @@ def packet_metadata_command(tshark_path: str, pcap_path: Path) -> list[str]:
         "tls.handshake.extensions_server_name",
         "-e",
         "tls.handshake.extensions_alpn_str",
+        "-e",
+        "frame.protocols",
+        "-e",
+        "ipv6.src",
+        "-e",
+        "ipv6.dst",
     ]
 
 
@@ -129,6 +135,24 @@ def parse_packet_metadata_line(line: str) -> PacketMetadata | None:
         transport = "udp"
         src_port = udp_src
         dst_port = udp_dst
+
+    # tshark exposes embedded headers too (e.g. ICMP errors quoting UDP).
+    # Preserve the frame in packet/byte totals without inventing a transport flow.
+    protocols = parts[12].split(":") if len(parts) >= 13 else []
+    network_layers = [name for name in protocols if name in {"ip", "ipv6"}]
+    if network_layers:
+        if network_layers[0] == "ipv6":
+            src_ip = clean_text(parts[13] if len(parts) >= 14 else "")
+            dst_ip = clean_text(parts[14] if len(parts) >= 15 else "")
+        src_ip = src_ip.split(",", 1)[0] if src_ip else None
+        dst_ip = dst_ip.split(",", 1)[0] if dst_ip else None
+    outer_transport = next(
+        (name for name in protocols if name in {"icmp", "icmpv6", "tcp", "udp"}), None
+    )
+    if outer_transport in {"icmp", "icmpv6"} or len(network_layers) > 1:
+        transport = outer_transport if outer_transport in {"icmp", "icmpv6"} else "unknown"
+        src_port = dst_port = None
+        tcp_stream = tls_type = tls_sni = tls_alpn = None
 
     direction, confidence, reason = infer_direction_from_ports(
         src_port=src_port,
@@ -225,7 +249,12 @@ def endpoint_label(ip: str | None, port: int | None) -> str:
 def flow_key(packet: PacketMetadata) -> tuple[str, str] | None:
     if packet.transport == "tcp" and packet.tcp_stream:
         return ("tcp", packet.tcp_stream)
-    if packet.src_ip and packet.dst_ip and packet.src_port is not None and packet.dst_port is not None:
+    if (
+        packet.src_ip
+        and packet.dst_ip
+        and packet.src_port is not None
+        and packet.dst_port is not None
+    ):
         a = f"{packet.src_ip}:{packet.src_port}"
         b = f"{packet.dst_ip}:{packet.dst_port}"
         return (packet.transport, "|".join(sorted((a, b))))
@@ -245,7 +274,9 @@ def summarize_flows(flow_stats: dict[tuple[str, str], dict[str, Any]]) -> dict[s
     entries = list(flow_stats.values())
     packets = sorted(float(entry["packets"]) for entry in entries)
     bytes_ = sorted(float(entry["bytes"]) for entry in entries)
-    top = sorted(entries, key=lambda item: (int(item["bytes"]), int(item["packets"])), reverse=True)[:5]
+    top = sorted(
+        entries, key=lambda item: (int(item["bytes"]), int(item["packets"])), reverse=True
+    )[:5]
     top_rows: list[dict[str, Any]] = []
     for item in top:
         directionality = "unknown"
@@ -276,7 +307,9 @@ def summarize_flows(flow_stats: dict[tuple[str, str], dict[str, Any]]) -> dict[s
 
 
 def compute_burst_summary(bytes_by_s: dict[int, int], pkts_by_s: dict[int, int]) -> dict[str, Any]:
-    active_seconds = sorted(sec for sec, value in bytes_by_s.items() if value > 0 or pkts_by_s.get(sec, 0) > 0)
+    active_seconds = sorted(
+        sec for sec, value in bytes_by_s.items() if value > 0 or pkts_by_s.get(sec, 0) > 0
+    )
     if not active_seconds:
         return {
             "active_second_count": 0,

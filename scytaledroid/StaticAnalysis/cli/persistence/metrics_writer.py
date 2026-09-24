@@ -16,13 +16,15 @@ from scytaledroid.StaticAnalysis.modules.permissions.permission_protection_looku
     _fetch_protections as _prot_map,
 )
 from scytaledroid.StaticAnalysis.risk.permission import (
+    collect_catalog_score_signals,
+)
+from scytaledroid.StaticAnalysis.risk.permission import (
     permission_points_0_20 as _perm_pts,
 )
 from scytaledroid.StaticAnalysis.risk.permission import (
     permission_risk_grade as _perm_grade,
 )
 from scytaledroid.StaticAnalysis.risk.permission import (
-    collect_catalog_score_signals,
     permission_risk_score_detail as _perm_detail,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -71,9 +73,7 @@ def _effective_http_counts(string_data: Mapping[str, object]) -> tuple[int, int]
     for bucket in ("http_cleartext", "endpoints"):
         bucket_entries = samples_map.get(bucket) or []
         if isinstance(bucket_entries, Sequence):
-            http_samples.extend(
-                [entry for entry in bucket_entries if isinstance(entry, Mapping)]
-            )
+            http_samples.extend([entry for entry in bucket_entries if isinstance(entry, Mapping)])
     code_hosts: set[str] = set()
     asset_hosts: set[str] = set()
     for sample in http_samples:
@@ -99,10 +99,12 @@ def _effective_http_counts(string_data: Mapping[str, object]) -> tuple[int, int]
 
 
 def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> MetricsBundle:
-    declared_pairs, _resolved_sdk, target_sdk, allow_backup_flag, legacy_ext_flag = _resolve_perm_inputs(
-        report=report,
-        sdk=None,
-        declared=None,
+    declared_pairs, _resolved_sdk, target_sdk, allow_backup_flag, legacy_ext_flag = (
+        _resolve_perm_inputs(
+            report=report,
+            sdk=None,
+            declared=None,
+        )
     )
     declared = [name for name, _tag in declared_pairs]
     flags = getattr(report, "manifest_flags", None)
@@ -156,11 +158,18 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
     dangerous = rc.get("dangerous", 0)
     signature = rc.get("signature", 0)
     oem = vc.get("ADS", 0)
-    flags = flags or type("_Flags", (), {
-        "allow_backup": False,
-        "request_legacy_external_storage": False,
-        "uses_cleartext_traffic": False,
-    })()
+    flags = (
+        flags
+        or type(
+            "_Flags",
+            (),
+            {
+                "allow_backup": False,
+                "request_legacy_external_storage": False,
+                "uses_cleartext_traffic": False,
+            },
+        )()
+    )
     raw_detail = _perm_detail(
         dangerous=dangerous,
         signature=signature,
@@ -186,7 +195,10 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
         privileged_declared=catalog_signals["privileged_declared"],
     )
     detail: MutableMapping[str, Any] = dict(raw_detail) if isinstance(raw_detail, Mapping) else {}
-    permission_score = float(detail.get("score_3dp", detail.get("score_capped", detail.get("score_raw", 0.0)) or 0.0) or 0.0)
+    permission_score = float(
+        detail.get("score_3dp", detail.get("score_capped", detail.get("score_raw", 0.0)) or 0.0)
+        or 0.0
+    )
     permission_score = round(permission_score, 3)
     permission_grade = _perm_grade(permission_score)
     detail["score_3dp"] = permission_score
@@ -227,7 +239,9 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
     corr_points = 0.0
     if has_code_http and ("android.permission.INTERNET" in declared):
         corr_points += 1.0
-    if any(str(p).endswith("READ_CONTACTS") for p in declared) and aggregates_map.get("endpoint_roots"):
+    if any(str(p).endswith("READ_CONTACTS") for p in declared) and aggregates_map.get(
+        "endpoint_roots"
+    ):
         corr_points += 1.0
     corr_points = min(5.0, corr_points)
 
@@ -256,29 +270,41 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
             signature_pts = _points(sig_components.get("signature", 0.0))
             vendor_pts = _points(sig_components.get("oem", sig_components.get("vendor", 0.0)))
             if dangerous_pts:
-                contributors.append((
-                    "permissions_dangerous",
-                    dangerous_pts,
-                    f"Dangerous permissions footprint (+{dangerous_pts})",
-                    0,
-                ))
+                contributors.append(
+                    (
+                        "permissions_dangerous",
+                        dangerous_pts,
+                        f"Dangerous permissions footprint (+{dangerous_pts})",
+                        0,
+                    )
+                )
             if signature_pts:
-                contributors.append((
-                    "permissions_signature",
-                    signature_pts,
-                    f"Signature-level capabilities (+{signature_pts})",
-                    0,
-                ))
+                contributors.append(
+                    (
+                        "permissions_signature",
+                        signature_pts,
+                        f"Signature-level capabilities (+{signature_pts})",
+                        0,
+                    )
+                )
             if vendor_pts:
-                contributors.append((
-                    "permissions_oem",
-                    vendor_pts,
-                    f"OEM/custom permissions (+{vendor_pts})",
-                    0,
-                ))
-        penalty_components = detail.get("penalty_components", {}) if isinstance(detail, Mapping) else {}
-        flagged_component = penalty_components.get("flagged_normal", detail.get("flagged_normal_component", 0.0))
-        weak_guard_component = penalty_components.get("weak_guard", detail.get("weak_guard_component", 0.0))
+                contributors.append(
+                    (
+                        "permissions_oem",
+                        vendor_pts,
+                        f"OEM/custom permissions (+{vendor_pts})",
+                        0,
+                    )
+                )
+        penalty_components = (
+            detail.get("penalty_components", {}) if isinstance(detail, Mapping) else {}
+        )
+        flagged_component = penalty_components.get(
+            "flagged_normal", detail.get("flagged_normal_component", 0.0)
+        )
+        weak_guard_component = penalty_components.get(
+            "weak_guard", detail.get("weak_guard_component", 0.0)
+        )
 
         flagged_pts = _points(flagged_component)
         if flagged_pts:
@@ -304,20 +330,24 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
 
         breadth_pts = _points(breadth)
         if breadth_pts:
-            contributors.append((
-                "permissions_breadth",
-                breadth_pts,
-                f"Capability breadth bonus (+{breadth_pts})",
-                0,
-            ))
+            contributors.append(
+                (
+                    "permissions_breadth",
+                    breadth_pts,
+                    f"Capability breadth bonus (+{breadth_pts})",
+                    0,
+                )
+            )
         modernization_pts = _points(modernization)
         if modernization_pts:
-            contributors.append((
-                "permissions_modernization",
-                -modernization_pts,
-                f"Modernization credit (targetSdk/flags) (−{modernization_pts})",
-                0,
-            ))
+            contributors.append(
+                (
+                    "permissions_modernization",
+                    -modernization_pts,
+                    f"Modernization credit (targetSdk/flags) (−{modernization_pts})",
+                    0,
+                )
+            )
         if net_points:
             if uses_cleartext and has_code_http:
                 reason = "usesCleartextTraffic with code-path HTTP endpoints"
@@ -327,40 +357,50 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
                 reason = "Network hygiene signal"
             contributors.append(("network", net_points, f"{reason} (+{net_points})", 0))
         if comp_points:
-            contributors.append((
-                "components",
-                comp_points,
-                f"Exported components without guards (+{comp_points})",
-                0,
-            ))
+            contributors.append(
+                (
+                    "components",
+                    comp_points,
+                    f"Exported components without guards (+{comp_points})",
+                    0,
+                )
+            )
         if sto_points:
-            contributors.append((
-                "storage",
-                sto_points,
-                f"Legacy storage flag/requestLegacyExternalStorage (+{sto_points})",
-                0,
-            ))
+            contributors.append(
+                (
+                    "storage",
+                    sto_points,
+                    f"Legacy storage flag/requestLegacyExternalStorage (+{sto_points})",
+                    0,
+                )
+            )
         if secrets_points:
-            contributors.append((
-                "secrets",
-                secrets_points,
-                f"Validated secrets & entropy findings (+{secrets_points})",
-                0,
-            ))
+            contributors.append(
+                (
+                    "secrets",
+                    secrets_points,
+                    f"Validated secrets & entropy findings (+{secrets_points})",
+                    0,
+                )
+            )
         if webssl_points:
-            contributors.append((
-                "webssl",
-                webssl_points,
-                f"WebView/SSL configuration signals (+{webssl_points})",
-                0,
-            ))
+            contributors.append(
+                (
+                    "webssl",
+                    webssl_points,
+                    f"WebView/SSL configuration signals (+{webssl_points})",
+                    0,
+                )
+            )
         if corr_points:
-            contributors.append((
-                "correlations",
-                corr_points,
-                f"Heuristic static exposure correlations (+{corr_points})",
-                0,
-            ))
+            contributors.append(
+                (
+                    "correlations",
+                    corr_points,
+                    f"Heuristic static exposure correlations (+{corr_points})",
+                    0,
+                )
+            )
     except Exception as exc:  # pragma: no cover - defensive
         log.warning(
             f"Failed to derive contributor weights: {exc}",

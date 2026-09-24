@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.persistence import run_writers as rw
 from scytaledroid.StaticAnalysis.cli.persistence.finalization_flow import (
     StaticRunFinalizationCallbacks,

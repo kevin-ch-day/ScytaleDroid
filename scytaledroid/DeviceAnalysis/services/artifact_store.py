@@ -23,7 +23,9 @@ def _configured_external_apk_store_mount_roots() -> tuple[Path, ...]:
     configured = str(os.getenv("SCYTALEDROID_EXTERNAL_APK_STORE_MOUNT_ROOTS", "") or "").strip()
     if not configured:
         return _DEFAULT_EXTERNAL_APK_STORE_MOUNT_ROOTS
-    roots = tuple(Path(value).expanduser() for value in configured.split(os.pathsep) if value.strip())
+    roots = tuple(
+        Path(value).expanduser() for value in configured.split(os.pathsep) if value.strip()
+    )
     return roots or _DEFAULT_EXTERNAL_APK_STORE_MOUNT_ROOTS
 
 
@@ -126,9 +128,7 @@ def materialize_apk(
 
     logical_destination = canonical_apk_path(sha256_digest, suffix=suffix)
     if logical_destination.is_symlink():
-        status = canonical_apk_blob_status(sha256_digest, suffix=suffix)
-        if not status["available"]:
-            _raise_cold_blob_unavailable(status)
+        verify_canonical_apk_resolvable(sha256_digest, suffix=suffix)
         destination = logical_destination.resolve(strict=False)
         if source == destination:
             return logical_destination
@@ -143,6 +143,7 @@ def materialize_apk(
         return destination
 
     if destination.exists():
+        verify_canonical_apk_resolvable(sha256_digest, suffix=suffix)
         if move:
             source.unlink(missing_ok=True)
         return destination
@@ -224,7 +225,11 @@ def ensure_external_apk_store_available(
         mount_roots=mount_roots,
         is_mount=is_mount,
     )
-    if status["is_symlink"] and status["external_mount_root"] and not status["external_mount_mounted"]:
+    if (
+        status["is_symlink"]
+        and status["external_mount_root"]
+        and not status["external_mount_mounted"]
+    ):
         raise ExternalApkStoreUnavailable(
             "External APK store is configured but not mounted: "
             f"{status['path']} -> {status['resolved_target']} "
@@ -242,12 +247,47 @@ def ensure_external_path_available(
     """Fail fast when a symlinked external path would write under an unmounted mountpoint."""
 
     status = external_path_mount_status(path=path, mount_roots=mount_roots, is_mount=is_mount)
-    if status["is_symlink"] and status["external_mount_root"] and not status["external_mount_mounted"]:
+    if (
+        status["is_symlink"]
+        and status["external_mount_root"]
+        and not status["external_mount_mounted"]
+    ):
         raise ExternalApkStoreUnavailable(
             f"{description} is configured but not mounted: "
             f"{status['path']} -> {status['resolved_target']} "
             f"(mountpoint {status['external_mount_root']})"
         )
+
+
+def verify_canonical_apk_resolvable(
+    sha256_digest: str,
+    *,
+    suffix: str = ".apk",
+    mount_roots: Sequence[Path] | None = None,
+    is_mount: Any | None = None,
+) -> Path:
+    """Confirm the canonical blob is a readable, non-empty file (hot or resolved cold).
+
+    This is a resolvability check, not a second SHA-256 of an existing destination.
+    Content-hash verification of a pre-existing blob is a separate follow-up.
+    """
+
+    status = canonical_apk_blob_status(
+        sha256_digest,
+        suffix=suffix,
+        mount_roots=mount_roots,
+        is_mount=is_mount,
+    )
+    if not status["available"]:
+        _raise_cold_blob_unavailable(status)
+    resolved = Path(str(status["resolved_path"])).expanduser()
+    if not resolved.is_file():
+        raise OSError(f"Canonical APK is not a regular file: {resolved}")
+    if resolved.stat().st_size <= 0:
+        raise OSError(f"Canonical APK blob is empty: {resolved}")
+    if not os.access(resolved, os.R_OK):
+        raise PermissionError(f"Canonical APK is not readable: {resolved}")
+    return canonical_apk_path(sha256_digest, suffix=suffix)
 
 
 def ensure_canonical_apk_blob_available(
@@ -462,6 +502,7 @@ __all__ = [
     "ColdApkBlobUnavailable",
     "compose_harvest_run_destination",
     "ensure_canonical_apk_blob_available",
+    "verify_canonical_apk_resolvable",
     "ensure_external_apk_store_available",
     "ensure_external_path_available",
     "external_apk_store_mount_status",

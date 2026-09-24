@@ -3,24 +3,22 @@
 from __future__ import annotations
 
 import inspect
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .db_engine import DatabaseEngine
+from .db_engine import DatabaseEngine, detect_placeholder_style
 from .session import database_session, get_current_engine
 
 ParamsType = Sequence[Any] | Mapping[str, Any] | None
 ParamRow = tuple[Any, ...]
 
-_PLACEHOLDER_SCAN_RE = re.compile("%")
 _THIS_FILE = Path(__file__).resolve()
 _REPO_ROOT = _THIS_FILE.parents[3]
 
 
 def _prepare_params(
-    params: tuple[Any, ...] | Mapping[str, Any]
+    params: tuple[Any, ...] | Mapping[str, Any],
 ) -> tuple[Any, ...] | Mapping[str, Any] | None:
     """Return None when the parameter payload is empty; otherwise the original."""
 
@@ -46,37 +44,9 @@ def _normalise_params(params: ParamsType) -> tuple[Any, ...] | Mapping[str, Any]
 
 
 def _detect_placeholder_style(query: str) -> str:
-    """Return 'named', 'positional', 'mixed', or 'none' for *query*."""
+    """Return 'named', 'positional', 'mixed', or 'none' for unquoted placeholders."""
 
-    named = False
-    positional = False
-
-    index = 0
-    length = len(query)
-    while index < length:
-        match = _PLACEHOLDER_SCAN_RE.search(query, index)
-        if not match:
-            break
-        pos = match.start()
-        if pos + 1 >= length:
-            break
-        next_char = query[pos + 1]
-        if next_char == "%":
-            index = pos + 2
-            continue
-        if next_char == "(":
-            named = True
-        else:
-            positional = True
-        if named and positional:
-            return "mixed"
-        index = pos + 1
-
-    if named:
-        return "named"
-    if positional:
-        return "positional"
-    return "none"
+    return detect_placeholder_style(query)
 
 
 def _validate_placeholder_style(query: str, params: tuple[Any, ...] | Mapping[str, Any]) -> None:
@@ -231,7 +201,9 @@ def _dispatch_single(
 
     # fetch_mode == "none"
     if return_lastrowid:
-        return db.execute_with_lastrowid(query, exec_params, query_name=effective_name, context=context)
+        return db.execute_with_lastrowid(
+            query, exec_params, query_name=effective_name, context=context
+        )
     db.execute(query, exec_params, query_name=effective_name, context=context)
     return None
 

@@ -140,7 +140,9 @@ def execute_harvest(
         )
         close_logger = True
     else:
-        base_context.update({k: v for k, v in getattr(log_adapter, "extra", {}).items() if k not in base_context})
+        base_context.update(
+            {k: v for k, v in getattr(log_adapter, "extra", {}).items() if k not in base_context}
+        )
 
     def _emit(
         level: str,
@@ -502,8 +504,10 @@ def _execute_package_plan(
         print_package_header=lambda package_plan, ui_index, ui_total: _print_package_header(
             package_plan, ui_index, ui_total, compact_mode=compact_mode
         ),
-        print_package_footer=lambda package_plan, package_stats, ui_index, ui_total: _print_package_footer(
-            package_plan, package_stats, ui_index, ui_total, compact_mode=compact_mode
+        print_package_footer=lambda package_plan, package_stats, ui_index, ui_total: (
+            _print_package_footer(
+                package_plan, package_stats, ui_index, ui_total, compact_mode=compact_mode
+            )
         ),
         print_stale_replan_outcome=lambda package_plan, artifact, artifact_index, artifact_total, outcome: (
             _print_stale_replan_outcome(
@@ -617,7 +621,9 @@ def _persist_install_set_spine(
                 "package_name": inventory.package_name,
                 "apk_set_id": apk_set_id,
                 "member_count": len(members),
-                "base_apk_sha256": next((member.sha256 for member in members if member.role == "base"), None),
+                "base_apk_sha256": next(
+                    (member.sha256 for member in members if member.role == "base"), None
+                ),
             },
         )
     except Exception as exc:
@@ -693,17 +699,25 @@ def _pull_and_record(
             sha256_digest=sha256_digest,
             suffix=suffix,
         ),
+        verify_canonical_apk=lambda sha256_digest, suffix: (
+            artifact_store.verify_canonical_apk_resolvable(
+                sha256_digest,
+                suffix=suffix,
+            )
+        ),
         repo_relative_path=artifact_store.repo_relative_path,
         inventory_signer_fingerprint=package_contract.inventory_signer_fingerprint,
         inventory_payload=inventory_payload,
         write_metadata_sidecar=write_metadata_sidecar,
-        print_artifact_status=lambda label, file_name, index, total, suffix, level: common.print_artifact_status(
-            label,
-            file_name,
-            index=index,
-            total=total,
-            suffix=suffix,
-            level=level,
+        print_artifact_status=lambda label, file_name, index, total, suffix, level: (
+            common.print_artifact_status(
+                label,
+                file_name,
+                index=index,
+                total=total,
+                suffix=suffix,
+                level=level,
+            )
         ),
         replace_session_apk_with_symlink_to_canonical=lambda session_artifact_path, canonical_absolute, enabled: (
             common.replace_session_apk_with_symlink_to_canonical(
@@ -750,10 +764,7 @@ def _print_stale_replan_outcome(
 def _print_progress(index: int, total: int, plan: PackagePlan) -> None:
     artifact_count = len(plan.artifacts)
     suffix = "artifact" if artifact_count == 1 else "artifacts"
-    message = (
-        f"[{index:>3}/{total}] {plan.inventory.package_name} "
-        f"({artifact_count} {suffix})"
-    )
+    message = f"[{index:>3}/{total}] {plan.inventory.package_name} ({artifact_count} {suffix})"
     print(status_messages.status(message))
 
 
@@ -887,7 +898,9 @@ def _print_progress_line(
     )
     line = f"Harvest: {status_summary.operator_summary}"
     skip_hint = ""
-    if force and (result.preflight_reason or status_summary.failed_count or status_summary.drifted_count):
+    if force and (
+        result.preflight_reason or status_summary.failed_count or status_summary.drifted_count
+    ):
         if result.preflight_reason:
             skip_hint = f" · preflight={result.preflight_reason}"
         elif result.skipped:
@@ -911,7 +924,9 @@ def _print_progress_line(
     print(status_messages.status(line, level=level))
 
 
-def _print_package_header(plan: PackagePlan, package_index: int, package_total: int, *, compact_mode: bool) -> None:
+def _print_package_header(
+    plan: PackagePlan, package_index: int, package_total: int, *, compact_mode: bool
+) -> None:
     if compact_mode or _quiet_mode():
         return
     label = plan.inventory.display_name()
@@ -1007,6 +1022,8 @@ def _print_package_footer(
         ),
         category="device",
     )
+
+
 def _terminal_abort_reason(result: PullResult) -> str | None:
     for error in result.errors:
         if error.reason == "device_unavailable":

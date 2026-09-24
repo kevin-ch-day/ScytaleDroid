@@ -42,6 +42,9 @@ SKIP_LABELS = {
     "apk_record_failed": "DB mirror: failed to record APK metadata (non-fatal)",
     "artifact_path_failed": "DB mirror: failed to record artifact path (non-fatal)",
     "source_path_failed": "DB mirror: failed to record source path (non-fatal)",
+    "canonical_materialization_failed": (
+        "Canonical APK store: durable materialization failed (research blocked)"
+    ),
     "dedupe_sha256": "Duplicate artifact (sha256 dedupe)",
 }
 
@@ -243,8 +246,12 @@ class HarvestRunMetrics:
         executed_packages = sum(1 for result in results if not result.preflight_reason)
         eligible_packages = total_packages - len(blocked_package_names)
         harvested_packages = sum(1 for result in results if result.ok)
-        path_stale_packages = sum(1 for result in results if _result_flag(result, "stale_replan_required"))
-        replanned_packages = sum(1 for result in results if _result_text(result, "stale_replan_outcome"))
+        path_stale_packages = sum(
+            1 for result in results if _result_flag(result, "stale_replan_required")
+        )
+        replanned_packages = sum(
+            1 for result in results if _result_text(result, "stale_replan_outcome")
+        )
         replan_success_packages = sum(
             1
             for result in results
@@ -370,7 +377,10 @@ def build_harvest_run_report(
         metrics.write_db_requested = True
     if write_db_effective is not None:
         metrics.write_db_effective = bool(write_db_effective)
-    elif metrics.packages_with_mirror_failures >= metrics.executed_packages and metrics.executed_packages > 0:
+    elif (
+        metrics.packages_with_mirror_failures >= metrics.executed_packages
+        and metrics.executed_packages > 0
+    ):
         metrics.write_db_effective = False
     pull_errors = metrics.artifacts_failed
     metadata = selection.metadata or {}
@@ -395,7 +405,9 @@ def build_harvest_run_report(
         metadata=metadata,
         scope_hash_changed=bool(metadata.get("inventory_scope_hash_changed")),
         policy_filtered=dict(plan.policy_filtered),
-        policy_details=_format_policy_details(plan.policy_filtered) if plan.policy_filtered else None,
+        policy_details=_format_policy_details(plan.policy_filtered)
+        if plan.policy_filtered
+        else None,
         excluded_counts=dict(metadata.get("excluded_counts") or {}),
         excluded_samples=dict(metadata.get("excluded_samples") or {}),
         denied_packages=_collect_denied_packages(results),
@@ -526,7 +538,9 @@ def _build_summary_card_lines(
                 limit=3,
             )
             lines.append(
-                format_card_line("Runtime", f"{metrics.runtime_skip_total} skip(s)", runtime_breakdown)
+                format_card_line(
+                    "Runtime", f"{metrics.runtime_skip_total} skip(s)", runtime_breakdown
+                )
             )
 
     replan_pairs = _format_breakdown_pairs(
@@ -616,12 +630,12 @@ def _harvest_highlights(metrics: HarvestRunMetrics, pull_errors: int) -> list[tu
                 )
             )
         else:
-            highlights.append(("warn", f"{count_phrase(metrics.runtime_skip_total, 'runtime skip')}"))
+            highlights.append(
+                ("warn", f"{count_phrase(metrics.runtime_skip_total, 'runtime skip')}")
+            )
 
     if pull_errors:
-        highlights.append(
-            ("warn", f"{count_phrase(pull_errors, 'artifact error')} encountered")
-        )
+        highlights.append(("warn", f"{count_phrase(pull_errors, 'artifact error')} encountered"))
 
     return highlights
 
@@ -649,9 +663,7 @@ def _derive_harvest_status(
         replan_failed_count=metrics.replan_failed_packages,
         replan_recovered_count=metrics.replan_recovered_packages,
         device_unavailable=any(
-            error.reason == "device_unavailable"
-            for result in results
-            for error in result.errors
+            error.reason == "device_unavailable" for result in results for error in result.errors
         ),
         mirror_failed_count=metrics.packages_with_mirror_failures,
         write_db_requested=metrics.write_db_requested,
@@ -815,7 +827,9 @@ def _build_harvest_result(
             capture_status=pull.capture_status,
             persistence_status=pull.persistence_status,
             research_status=pull.research_status,
-            manifest_path=normalise_local_path(pull.package_manifest_path) if pull.package_manifest_path else None,
+            manifest_path=normalise_local_path(pull.package_manifest_path)
+            if pull.package_manifest_path
+            else None,
         )
 
         for artifact in pull.ok:
@@ -892,7 +906,9 @@ def _packages_without_writes(
     return packages
 
 
-def _should_compact_view(selection: ScopeSelection, metrics: HarvestRunMetrics, plan: HarvestPlan) -> bool:
+def _should_compact_view(
+    selection: ScopeSelection, metrics: HarvestRunMetrics, plan: HarvestPlan
+) -> bool:
     """Decide if console output should be compacted due to large scope/skip volumes."""
 
     meta = selection.metadata or {}

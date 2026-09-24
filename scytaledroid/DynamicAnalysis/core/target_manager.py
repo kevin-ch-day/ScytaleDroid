@@ -17,6 +17,7 @@ from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DeviceAnalysis.identity import compute_signer_set_hash, extract_signer_digests
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.utils.path_utils import artifact_relative_path
 
 
 @dataclass(frozen=True)
@@ -138,7 +139,7 @@ class TargetManager:
             "apk_paths": package_paths,
             "signer_primary_digest": signer_digests[0] if signer_digests else None,
             "signer_set_hash": compute_signer_set_hash(signer_digests),
-            "package_info_artifact": str(path.relative_to(run_ctx.run_dir)),
+            "package_info_artifact": artifact_relative_path(run_ctx.run_dir, path),
         }
         artifact = self._artifact_record(run_ctx, path, "target_package_info")
         return metadata, artifact
@@ -152,7 +153,9 @@ class TargetManager:
             run_command=lambda command: adb_shell.run_shell(serial, list(command)),
             is_successful=lambda result: bool(str(result or "").strip()),
             extract_text=lambda result: str(result or ""),
-            accept_text=lambda text: adb_package_manager.output_looks_package_specific(text, package),
+            accept_text=lambda text: adb_package_manager.output_looks_package_specific(
+                text, package
+            ),
         )
         if result is not None:
             return str(result)
@@ -205,9 +208,11 @@ class TargetManager:
         path.write_text(output, encoding="utf-8")
         return path
 
-    def _artifact_record(self, run_ctx: RunContext, path: Path, artifact_type: str) -> ArtifactRecord:
+    def _artifact_record(
+        self, run_ctx: RunContext, path: Path, artifact_type: str
+    ) -> ArtifactRecord:
         return ArtifactRecord(
-            relative_path=str(path.relative_to(run_ctx.run_dir)),
+            relative_path=artifact_relative_path(run_ctx.run_dir, path),
             type=artifact_type,
             sha256=None,
             size_bytes=path.stat().st_size,
@@ -224,5 +229,6 @@ class TargetManager:
 
     def _extract_version_code(self, package_dump: str, package_name: str) -> str | None:
         return extract_version_code_from_dump(package_dump, package_name)
+
 
 __all__ = ["TargetManager", "TargetSnapshot", "extract_version_code_from_dump"]

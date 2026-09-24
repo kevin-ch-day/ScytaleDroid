@@ -40,6 +40,7 @@ def _complete_pull_result(inventory: InventoryRow) -> PullResult:
                 sha256="a" * 64,
                 artifact_label=artifact.artifact,
                 is_base=not artifact.is_split_member,
+                canonical_store_path=f"data/store/apk/sha256/aa/{'a' * 64}.apk",
             )
         )
     return result
@@ -70,5 +71,51 @@ def test_complete_pull_remains_clean_when_declared_and_path_counts_match() -> No
     package_contract.finalize_package_result(result, write_db_requested=False)
 
     assert result.comparison["inventory_paths_match_declared_splits"] is True
+    assert result.comparison["canonical_store_complete"] is True
+    assert result.comparison["canonical_durability_status"] == "ok"
     assert result.capture_status == "clean"
     assert result.research_status == "pending_audit"
+
+
+def test_finalize_blocks_research_when_canonical_store_path_missing() -> None:
+    inventory = _inventory(
+        declared_split_count=1,
+        paths=["/data/app/base.apk"],
+    )
+    result = _complete_pull_result(inventory)
+    result.ok[0].canonical_store_path = None
+
+    package_contract.finalize_package_result(result, write_db_requested=True)
+
+    assert result.capture_status == "partial"
+    assert result.persistence_status == "mirror_failed"
+    assert result.research_status == "ineligible"
+    assert "canonical_materialization_failed" in result.mirror_failure_reasons
+    assert result.comparison["canonical_durability_status"] == "failed"
+
+
+def test_finalize_blocks_research_when_canonical_error_present() -> None:
+    from scytaledroid.DeviceAnalysis.harvest.models import (
+        CANONICAL_MATERIALIZATION_FAILED,
+        ArtifactError,
+    )
+
+    inventory = _inventory(
+        declared_split_count=1,
+        paths=["/data/app/base.apk"],
+    )
+    result = _complete_pull_result(inventory)
+    result.errors.append(
+        ArtifactError(
+            source_path="/data/app/base.apk",
+            reason=CANONICAL_MATERIALIZATION_FAILED,
+            sha256="a" * 64,
+            session_copy="/tmp/base.apk",
+        )
+    )
+
+    package_contract.finalize_package_result(result, write_db_requested=True)
+
+    assert result.capture_status == "partial"
+    assert result.persistence_status == "mirror_failed"
+    assert result.research_status == "ineligible"

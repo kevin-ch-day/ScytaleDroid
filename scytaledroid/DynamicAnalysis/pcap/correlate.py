@@ -12,6 +12,7 @@ from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManife
 from scytaledroid.DynamicAnalysis.pcap.security_surface import (
     compute_static_dynamic_cleartext_posture,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import artifact_relative_path
 
 
 @dataclass(frozen=True)
@@ -76,8 +77,12 @@ def write_static_dynamic_overlap(
     cleartext_posture = compute_static_dynamic_cleartext_posture(embedded_plan, report)
     # Stable top-level aliases for reporting/CSV exports.
     overlap_ratio_total = overlap_ratio
-    overlap_ratio_nsc = (overlap_sources.get("nsc") or {}).get("overlap_ratio") if overlap_sources else None
-    overlap_ratio_strings = (overlap_sources.get("strings") or {}).get("overlap_ratio") if overlap_sources else None
+    overlap_ratio_nsc = (
+        (overlap_sources.get("nsc") or {}).get("overlap_ratio") if overlap_sources else None
+    )
+    overlap_ratio_strings = (
+        (overlap_sources.get("strings") or {}).get("overlap_ratio") if overlap_sources else None
+    )
     payload = {
         "static_domains_total": len(static_domains),
         "dynamic_domains_total": len(dynamic_domains),
@@ -113,7 +118,7 @@ def write_static_dynamic_overlap(
     output_path = run_dir / "analysis/static_dynamic_overlap.json"
     output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return ArtifactRecord(
-        relative_path=str(output_path.relative_to(run_dir)),
+        relative_path=artifact_relative_path(run_dir, output_path),
         type="static_dynamic_overlap",
         sha256=_sha256(output_path),
         size_bytes=output_path.stat().st_size,
@@ -133,7 +138,9 @@ def _static_domains(
     if embedded_plan is None:
         # Fallback to the summary if the plan is missing (should be rare).
         static_plan = (
-            manifest.target.get("static_plan_summary") if isinstance(manifest.target, dict) else None
+            manifest.target.get("static_plan_summary")
+            if isinstance(manifest.target, dict)
+            else None
         )
         if not isinstance(static_plan, dict):
             return set(), {}, {}
@@ -157,9 +164,15 @@ def _static_domains(
                 meta["sources"].update(sources[domain])
         return normalized, sources, metadata
 
-    network = embedded_plan.get("network_targets") if isinstance(embedded_plan.get("network_targets"), dict) else {}
+    network = (
+        embedded_plan.get("network_targets")
+        if isinstance(embedded_plan.get("network_targets"), dict)
+        else {}
+    )
     domains = network.get("domains") if isinstance(network.get("domains"), list) else []
-    domain_sources = network.get("domain_sources") if isinstance(network.get("domain_sources"), list) else []
+    domain_sources = (
+        network.get("domain_sources") if isinstance(network.get("domain_sources"), list) else []
+    )
 
     normalized = {_normalize_domain(item) for item in domains}
     normalized.discard("")
@@ -337,9 +350,7 @@ def _corroborated_pair_groups(
         if domain not in dynamic_domains:
             continue
         groups.update(
-            str(value)
-            for value in (meta.get("pair_groups") or set())
-            if str(value or "").strip()
+            str(value) for value in (meta.get("pair_groups") or set()) if str(value or "").strip()
         )
     return sorted(groups)
 

@@ -215,5 +215,5 @@ def test_menu_hub_renders_single_line_option_blocks(monkeypatch) -> None:
     option_calls = [call for call in print_calls if call["count"] > 0]
     assert option_calls
     assert all(call.get("show_descriptions") is False for call in option_calls)
-    assert len(option_calls) == 1
-    assert option_calls[0]["count"] == 6
+    assert len(option_calls) == 3
+    assert sum(call["count"] for call in option_calls) == 6

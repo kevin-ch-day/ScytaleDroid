@@ -10,6 +10,10 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    artifact_relative_path,
+    resolve_contained_path,
+)
 
 
 @dataclass
@@ -22,7 +26,9 @@ class RunEvent:
 class RunEventLogger:
     def __init__(self, run_ctx: RunContext) -> None:
         self.run_ctx = run_ctx
-        self.path = run_ctx.run_dir / "notes/run_events.jsonl"
+        self.path = resolve_contained_path(run_ctx.run_dir, "notes/run_events.jsonl")
+        if self.path is None:
+            raise ValueError("Event log must remain inside the evidence run directory")
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def log(self, event_type: str, details: dict[str, Any] | None = None) -> None:
@@ -31,10 +37,10 @@ class RunEventLogger:
     def finalize(self) -> ArtifactRecord | None:
         if not self.path.exists():
             return None
-        # Do not hash mutable logs inside the per-run manifest. Freeze-level
-        # immutability uses included_run_checksums in the dataset freeze manifest.
+        # Defer hashing until canonical final sealing. Later events are routed
+        # to a separate postseal sidecar and cannot change this retained log.
         return ArtifactRecord(
-            relative_path=str(self.path.relative_to(self.run_ctx.run_dir)),
+            relative_path=artifact_relative_path(self.run_ctx.run_dir, self.path),
             type="run_events",
             sha256=None,
             size_bytes=self.path.stat().st_size,
@@ -43,7 +49,7 @@ class RunEventLogger:
             pull_status="n/a",
         )
 
-    # Intentionally no hash_file here (run_events.jsonl is mutable).
+    # V2 final sealer owns hashing; producers do not duplicate that rule.
 
     @staticmethod
     def _now() -> str:
@@ -60,7 +66,12 @@ def append_run_event(
         event_type=event_type,
         details=details or {},
     )
-    path = run_dir / "notes" / "run_events.jsonl"
+    # Once sealed, operational logging must not mutate canonical evidence.
+    if (run_dir / "run_manifest.json").exists():
+        run_dir = run_dir.parent / (run_dir.name + ".postseal")
+    path = resolve_contained_path(run_dir, "notes/run_events.jsonl")
+    if path is None:
+        return
     # Best-effort logging: evidence-pack deletion mid-run (e.g. an operator
     # pruning "incomplete" dirs in another terminal) must not hard-crash a run.
     try:

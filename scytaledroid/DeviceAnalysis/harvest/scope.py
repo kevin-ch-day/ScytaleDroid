@@ -47,7 +47,9 @@ class _ScopeMenuDisplayRow:
     note: str | None = None
 
 
-def _rows_pullable_under_path_policy(rows: Sequence[InventoryRow], *, is_rooted: bool) -> list[InventoryRow]:
+def _rows_pullable_under_path_policy(
+    rows: Sequence[InventoryRow], *, is_rooted: bool
+) -> list[InventoryRow]:
     """Rows that have at least one APK path harvestable under current root/policy (pre-plan)."""
 
     if is_rooted:
@@ -55,7 +57,9 @@ def _rows_pullable_under_path_policy(rows: Sequence[InventoryRow], *, is_rooted:
     return [row for row in rows if any(rules.is_user_path(path) for path in row.apk_paths)]
 
 
-def _load_latest_scoped_inventory_packages(*, device_serial: str, scope_id: str) -> list[dict[str, object]] | None:
+def _load_latest_scoped_inventory_packages(
+    *, device_serial: str, scope_id: str
+) -> list[dict[str, object]] | None:
     """Best-effort: load latest scoped inventory snapshot packages for *scope_id*.
 
     This allows profile-scoped harvesting to use fresh version_code/version_name and
@@ -64,7 +68,14 @@ def _load_latest_scoped_inventory_packages(*, device_serial: str, scope_id: str)
 
     # Scoped snapshots are persisted under:
     # data/state/<serial>/inventory/scoped/latest_scoped_<scope_id>.json
-    p = Path("data") / "state" / device_serial / "inventory" / "scoped" / f"latest_scoped_{scope_id}.json"
+    p = (
+        Path("data")
+        / "state"
+        / device_serial
+        / "inventory"
+        / "scoped"
+        / f"latest_scoped_{scope_id}.json"
+    )
     if not p.exists():
         return None
     try:
@@ -86,6 +97,7 @@ def _compact_scope_label(label: str) -> str:
     if text == FULL_INVENTORY_POLICY_FILTERED_LABEL:
         return "All pullable packages"
     return text
+
 
 def _maybe_str(value: object) -> str | None:
     if value is None:
@@ -112,7 +124,9 @@ def _last_scope_detail(selection: ScopeSelection, *, is_rooted: bool) -> str:
         pullable_count = len(
             _rows_pullable_under_path_policy(selection.packages, is_rooted=is_rooted)
         )
-    mode_hint = "full inventory" if selection.kind == "everything" else selection.kind.replace("_", " ")
+    mode_hint = (
+        "full inventory" if selection.kind == "everything" else selection.kind.replace("_", " ")
+    )
     return (
         f"{_compact_scope_label(selection.label)} · {mode_hint} · "
         f"{inventory_count} inventory / {pullable_count} pullable"
@@ -153,6 +167,7 @@ def _merge_rows_prefer_scoped(
         by_pkg[pkg] = row
     return list(by_pkg.values())
 
+
 def _hydrate_missing_rows_from_adb(
     *,
     device_serial: str,
@@ -170,9 +185,9 @@ def _hydrate_missing_rows_from_adb(
     if not missing_packages:
         return []
     # Local import to avoid adding hard adb deps at module import time.
+    from scytaledroid.DeviceAnalysis import package_profiles
     from scytaledroid.DeviceAnalysis.adb import packages as adb_packages  # type: ignore
     from scytaledroid.DeviceAnalysis.inventory.normalizer import derive_inventory_category
-    from scytaledroid.DeviceAnalysis import package_profiles
     from scytaledroid.DeviceAnalysis.runtime_flags import allow_inventory_fallbacks
 
     allow_fallbacks = allow_inventory_fallbacks()
@@ -194,7 +209,9 @@ def _hydrate_missing_rows_from_adb(
     hydrated: list[InventoryRow] = []
     for pkg in sorted({p.strip().lower() for p in missing_packages if str(p).strip()}):
         try:
-            apk_paths = adb_packages.get_package_paths(device_serial, pkg, allow_fallbacks=allow_fallbacks)
+            apk_paths = adb_packages.get_package_paths(
+                device_serial, pkg, allow_fallbacks=allow_fallbacks
+            )
             meta = adb_packages.get_package_metadata(device_serial, pkg, refresh=True)
         except Exception:
             continue
@@ -254,10 +271,17 @@ def _precheck_required_packages(
     # - On PASS, printing the full "present on device" list is noisy and hard to copy/paste.
     # - On FAIL, we always print missing/blocked lists.
     # Set SCYTALEDROID_PRECHECK_VERBOSE=1 to always print the full present list.
-    verbose = os.environ.get("SCYTALEDROID_PRECHECK_VERBOSE", "").strip().lower() in {"1", "true", "yes", "y"}
+    verbose = os.environ.get("SCYTALEDROID_PRECHECK_VERBOSE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
 
     pkg_labels = package_labels or {}
-    inv_by_pkg = {row.package_name.strip().lower(): row for row in inventory_rows if row.package_name}
+    inv_by_pkg = {
+        row.package_name.strip().lower(): row for row in inventory_rows if row.package_name
+    }
     inv_pkgs = set(inv_by_pkg.keys())
     exp = {p.strip().lower() for p in expected_packages if p.strip()}
 
@@ -320,7 +344,11 @@ def _precheck_required_packages(
             print(f"- {pkg}{suffix}")
     if blocked:
         print()
-        print(status_messages.status("Present but blocked by policy (non-root paths):", level="blocked"))
+        print(
+            status_messages.status(
+                "Present but blocked by policy (non-root paths):", level="blocked"
+            )
+        )
         for pkg in blocked:
             label = pkg_labels.get(pkg, "")
             suffix = f" ({label})" if label else ""
@@ -341,13 +369,27 @@ def _precheck_required_packages(
                 suffix = f" ({label})" if label else ""
                 print(f"- {pkg}{suffix}")
             print(f"... ({len(present) - 20} more)")
-    if not missing and not blocked and not (
-        expected_catalog_size is not None and actual_catalog_size is not None and expected_catalog_size != actual_catalog_size
+    if (
+        not missing
+        and not blocked
+        and not (
+            expected_catalog_size is not None
+            and actual_catalog_size is not None
+            and expected_catalog_size != actual_catalog_size
+        )
     ):
-        print(status_messages.status("Precheck PASS (all required packages present + eligible).", level="success"))
+        print(
+            status_messages.status(
+                "Precheck PASS (all required packages present + eligible).", level="success"
+            )
+        )
         return True, ""
 
-    if expected_catalog_size is not None and actual_catalog_size is not None and expected_catalog_size != actual_catalog_size:
+    if (
+        expected_catalog_size is not None
+        and actual_catalog_size is not None
+        and expected_catalog_size != actual_catalog_size
+    ):
         reason = "catalog_not_frozen"
     else:
         reason = "missing_on_device" if missing else "blocked_by_policy"
@@ -382,14 +424,18 @@ def _load_active_profile_scopes(
             continue
 
         working_rows = list(rows)
-        scoped_packages = _load_latest_scoped_inventory_packages(device_serial=device_serial, scope_id=scope_id)
+        scoped_packages = _load_latest_scoped_inventory_packages(
+            device_serial=device_serial, scope_id=scope_id
+        )
         if scoped_packages:
             scoped_rows = build_inventory_rows(scoped_packages)
             scoped_rows = [row for row in scoped_rows if row.package_name.lower() in expected]
             if scoped_rows:
                 working_rows = _merge_rows_prefer_scoped(rows=working_rows, scoped_rows=scoped_rows)
 
-        existing_pkgs = {row.package_name.strip().lower() for row in working_rows if row.package_name}
+        existing_pkgs = {
+            row.package_name.strip().lower() for row in working_rows if row.package_name
+        }
         missing_packages = {pkg for pkg in expected if pkg and pkg not in existing_pkgs}
         if missing_packages:
             working_rows.extend(
@@ -509,24 +555,22 @@ def select_package_scope(
             pullable=len(pullable_full),
             files=full_pullable_files,
             note=full_note,
-            handler=lambda rows=rows,
-            full_pullable_files=full_pullable_files,
-            pullable_full=pullable_full,
-            blocked_full=blocked_full,
-            is_rooted=is_rooted: ScopeSelection(
-                label=FULL_INVENTORY_POLICY_FILTERED_LABEL,
-                packages=list(rows),
-                kind="everything",
-                metadata={
-                    "estimated_files": full_pullable_files,
-                    "candidate_count": len(rows),
-                    "selected_count": len(rows),
-                    "pullable_count": len(pullable_full),
-                    "policy_blocked_inventory": blocked_full,
-                    # Default to delta-filter for huge scopes unless the operator overrides it.
-                    # The workflow will prompt for delta-vs-full-refresh when a delta summary exists.
-                    "policy": "non_root_paths" if not is_rooted else "none",
-                },
+            handler=lambda rows=rows, full_pullable_files=full_pullable_files, pullable_full=pullable_full, blocked_full=blocked_full, is_rooted=is_rooted: (
+                ScopeSelection(
+                    label=FULL_INVENTORY_POLICY_FILTERED_LABEL,
+                    packages=list(rows),
+                    kind="everything",
+                    metadata={
+                        "estimated_files": full_pullable_files,
+                        "candidate_count": len(rows),
+                        "selected_count": len(rows),
+                        "pullable_count": len(pullable_full),
+                        "policy_blocked_inventory": blocked_full,
+                        # Default to delta-filter for huge scopes unless the operator overrides it.
+                        # The workflow will prompt for delta-vs-full-refresh when a delta summary exists.
+                        "policy": "non_root_paths" if not is_rooted else "none",
+                    },
+                )
             ),
         )
         _add_entry(
@@ -536,7 +580,9 @@ def select_package_scope(
             pullable=_DASH,
             files=_DASH,
             note=profile_note,
-            handler=lambda: _scope_profiles(rows, allow, device_serial=device_serial, is_rooted=is_rooted),
+            handler=lambda: _scope_profiles(
+                rows, allow, device_serial=device_serial, is_rooted=is_rooted
+            ),
         )
         _add_entry(
             "3",
@@ -586,8 +632,14 @@ def select_package_scope(
             continue
 
         # Scoped profile selections can still benefit from an explicit inventory precheck.
-        if bool(selection.metadata.get("profile_scope")) and selection.metadata.get("expected_packages"):
-            expected = {str(p).strip() for p in (selection.metadata.get("expected_packages") or []) if str(p).strip()}
+        if bool(selection.metadata.get("profile_scope")) and selection.metadata.get(
+            "expected_packages"
+        ):
+            expected = {
+                str(p).strip()
+                for p in (selection.metadata.get("expected_packages") or [])
+                if str(p).strip()
+            }
             labels = selection.metadata.get("package_labels")
             pkg_labels = labels if isinstance(labels, dict) else None
 
@@ -811,9 +863,7 @@ def _scope_profiles(
         return None
 
     package_labels = {
-        row.package_name: row.display_name()
-        for row in profile_rows
-        if row.package_name
+        row.package_name: row.display_name() for row in profile_rows if row.package_name
     }
     metadata = {
         "profile_scope": True,
@@ -850,7 +900,9 @@ def _scope_category_subset(
     for category in categories:
         combined.extend(category_groups.get(category, []))
     if not combined:
-        print(status_messages.status(f"No packages tagged as {', '.join(categories)}.", level="warn"))
+        print(
+            status_messages.status(f"No packages tagged as {', '.join(categories)}.", level="warn")
+        )
         return None
 
     filtered, excluded = apply_default_scope(combined, allow)
@@ -912,12 +964,14 @@ def _scope_watchlist(entry: _WatchlistEntry) -> ScopeSelection | None:
     )
 
 
-def _scope_google_allowlist(
-    rows: Sequence[InventoryRow], allow: set[str]
-) -> ScopeSelection | None:
+def _scope_google_allowlist(rows: Sequence[InventoryRow], allow: set[str]) -> ScopeSelection | None:
     candidates = [row for row in rows if row.package_name in allow]
     if not candidates:
-        print(status_messages.status("No Google allow-list packages found in inventory.", level="warn"))
+        print(
+            status_messages.status(
+                "No Google allow-list packages found in inventory.", level="warn"
+            )
+        )
         return None
     filtered, excluded = apply_default_scope(candidates, allow)
     if not filtered:
@@ -1059,7 +1113,15 @@ def _print_scope_overview(
             (
                 FULL_INVENTORY_POLICY_FILTERED_LABEL,
                 str(len(rows)),
-                _format_count({"files": estimated_files(_rows_pullable_under_path_policy(rows, is_rooted=is_rooted))}, "files", prefix="~"),
+                _format_count(
+                    {
+                        "files": estimated_files(
+                            _rows_pullable_under_path_policy(rows, is_rooted=is_rooted)
+                        )
+                    },
+                    "files",
+                    prefix="~",
+                ),
                 "Policy still applies",
             ),
         ]

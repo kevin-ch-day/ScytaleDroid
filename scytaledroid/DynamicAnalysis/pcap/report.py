@@ -23,6 +23,7 @@ from scytaledroid.DynamicAnalysis.pcap.security_surface import (
 )
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
 from scytaledroid.DynamicAnalysis.pcap.transport_health import summarize_transport_health
+from scytaledroid.DynamicAnalysis.utils.path_utils import artifact_relative_path
 
 _CAPINFOS_FIELDS = {
     "Number of packets": "packet_count",
@@ -74,12 +75,12 @@ def write_pcap_report(
     target = manifest.target if isinstance(manifest.target, dict) else {}
     package_name_raw = str(target.get("package_name") or target.get("package") or "").strip()
     package_name = package_name_raw.lower()
-    app_label = str(
-        target.get("display_name")
-        or target.get("app_label")
-        or target.get("label")
-        or ""
-    ).strip() or None
+    app_label = (
+        str(
+            target.get("display_name") or target.get("app_label") or target.get("label") or ""
+        ).strip()
+        or None
+    )
     if package_name_raw and (not app_label or app_label == package_name_raw):
         db_label = str(fetch_display_name(package_name_raw) or "").strip()
         if db_label:
@@ -95,7 +96,7 @@ def write_pcap_report(
 
     report = {
         "generated_at": datetime.now(UTC).isoformat(),
-        "pcap_path": str(pcap_path.relative_to(run_dir)) if pcap_path else None,
+        "pcap_path": artifact_relative_path(run_dir, pcap_path) if pcap_path else None,
         "pcap_sha256": pcap_artifact.sha256 if pcap_artifact else None,
         "pcap_size_bytes": pcap_artifact.size_bytes if pcap_artifact else None,
         "package_name": package_name_raw or None,
@@ -112,13 +113,20 @@ def write_pcap_report(
         "missing_tools": missing_tools,
         "reason_codes": reason_codes,
         "no_traffic_observed": 0,
-        "capinfos": {"raw": "", "parsed": {}, "error": "skipped"} if report_status == "skip" else _run_capinfos(capinfos_path, pcap_path),  # type: ignore[arg-type]
+        "capinfos": {"raw": "", "parsed": {}, "error": "skipped"}
+        if report_status == "skip"
+        else _run_capinfos(capinfos_path, pcap_path),  # type: ignore[arg-type]
         "protocol_hierarchy": [],
         # Aggregated protocol hierarchy (tshark output can include duplicates).
         "protocol_hierarchy_agg": {"bytes": {}, "frames": {}, "duplicates": []},
         # Normalized transport ratios derived from the aggregated hierarchy (clamped to [0,1]).
         # These are redundant with pcap_features.json but useful for audit/debug.
-        "protocol_ratios": {"tcp_ratio": None, "udp_ratio": None, "tls_ratio": None, "quic_ratio": None},
+        "protocol_ratios": {
+            "tcp_ratio": None,
+            "udp_ratio": None,
+            "tls_ratio": None,
+            "quic_ratio": None,
+        },
         "top_sni": [],
         "top_dns": [],
         # Extra counters for network diversity QA (no payload inspection).
@@ -199,7 +207,9 @@ def write_pcap_report(
             report["startup_profile"] = stats.get("startup_profile") or {}
             report["tls_quic_visibility"] = stats.get("tls_quic_visibility") or {}
         try:
-            report["transport_health"] = summarize_transport_health(pcap_path, tshark_path=tshark_path)
+            report["transport_health"] = summarize_transport_health(
+                pcap_path, tshark_path=tshark_path
+            )
         except Exception as exc:  # noqa: BLE001
             _log(event_logger, "pcap_report_transport_health_failed", {"error": str(exc)})
         try:
@@ -270,7 +280,7 @@ def write_pcap_report(
 
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     return ArtifactRecord(
-        relative_path=str(report_path.relative_to(run_dir)),
+        relative_path=artifact_relative_path(run_dir, report_path),
         type="pcap_report",
         sha256=_sha256(report_path),
         size_bytes=report_path.stat().st_size,
@@ -283,6 +293,10 @@ def write_pcap_report(
 def _find_pcap_artifact(manifest: RunManifest, run_dir: Path):
     for artifact in manifest.artifacts:
         if artifact.type == "pcapdroid_capture":
+            return artifact
+    # Lab captures retain their actual producer; do not label them PCAPdroid.
+    for artifact in manifest.artifacts:
+        if artifact.type == "emulator_pcap":
             return artifact
     meta_rel = None
     for artifact in manifest.artifacts:
@@ -307,7 +321,7 @@ def _find_pcap_artifact(manifest: RunManifest, run_dir: Path):
     except OSError:
         size_bytes = None
     return ArtifactRecord(
-        relative_path=str(candidate.relative_to(run_dir)),
+        relative_path=artifact_relative_path(run_dir, candidate),
         type="pcapdroid_capture",
         produced_by="pcapdroid_capture",
         sha256=None,
@@ -410,7 +424,11 @@ def _aggregate_protocol_hierarchy(rows: list[dict[str, object]]) -> dict[str, ob
         bytes_by[proto] = bytes_by.get(proto, 0) + max(0, b)
         frames_by[proto] = frames_by.get(proto, 0) + max(0, f)
 
-    return {"bytes": bytes_by, "frames": frames_by, "agg": {"bytes": bytes_by, "frames": frames_by, "duplicates": duplicates}}
+    return {
+        "bytes": bytes_by,
+        "frames": frames_by,
+        "agg": {"bytes": bytes_by, "frames": frames_by, "duplicates": duplicates},
+    }
 
 
 def _bounded_ratio(numer: int | None, denom: int | None) -> float | None:
@@ -445,7 +463,12 @@ def _compute_protocol_ratios(bytes_by: dict[str, int]) -> dict[str, float | None
     if tls_bytes is not None and tcp_bytes is not None:
         tls_ratio = _bounded_ratio(min(int(tls_bytes), int(tcp_bytes)), int(tcp_bytes))
 
-    return {"tcp_ratio": tcp_ratio, "udp_ratio": udp_ratio, "tls_ratio": tls_ratio, "quic_ratio": quic_ratio}
+    return {
+        "tcp_ratio": tcp_ratio,
+        "udp_ratio": udp_ratio,
+        "tls_ratio": tls_ratio,
+        "quic_ratio": quic_ratio,
+    }
 
 
 def _run_top_fields(
@@ -520,7 +543,9 @@ def _run_command(cmd: list[str]) -> dict[str, object]:
     return {
         "stdout": completed.stdout or "",
         "stderr": completed.stderr or "",
-        "error": None if completed.returncode == 0 else completed.stderr.strip() or "command_failed",
+        "error": None
+        if completed.returncode == 0
+        else completed.stderr.strip() or "command_failed",
     }
 
 

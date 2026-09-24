@@ -12,7 +12,13 @@ from scytaledroid.DeviceAnalysis.apk_label import extract_apk_application_label
 from scytaledroid.DeviceAnalysis.apk_signing import extract_apk_cert_sha256
 from scytaledroid.DeviceAnalysis.identity import is_base_artifact, normalize_hex_digest
 
-from .models import ArtifactError, ArtifactPlan, ArtifactResult, PackagePlan
+from .models import (
+    CANONICAL_MATERIALIZATION_FAILED,
+    ArtifactError,
+    ArtifactPlan,
+    ArtifactResult,
+    PackagePlan,
+)
 
 EmitFn = Callable[[str, str, Mapping[str, object | None], str | None], None]
 
@@ -73,6 +79,7 @@ class ArtifactExecutionDeps:
     tracker_register: Callable[[str], tuple[bool, int]]
     cleanup_duplicate: Callable[[Path], None]
     materialize_apk: Callable[[Path, str, str], Path]
+    verify_canonical_apk: Callable[[str, str], Path]
     repo_relative_path: Callable[[Path], str]
     inventory_signer_fingerprint: Callable[[object], str | None]
     inventory_payload: Callable[[object], Mapping[str, object]]
@@ -118,7 +125,39 @@ def pull_and_record(
     if not keep:
         return _handle_duplicate(request, deps, dest_path)
 
-    canonical_store_path, canonical_abs = _materialize_canonical_copy(request, deps, dest_path, hashes["sha256"])
+    materialization = _materialize_canonical_copy(deps, dest_path, hashes["sha256"])
+    if materialization.failure_reason:
+        _write_sidecar(
+            request=request,
+            deps=deps,
+            dest_path=dest_path,
+            hashes=hashes,
+            apk_id=None,
+            occurrence=occurrence,
+            canonical_store_path=None,
+            materialization=materialization,
+        )
+        _report_canonical_failure(request, deps, dest_path, hashes["sha256"], materialization)
+        return (
+            ArtifactResult(
+                file_name=dest_path.name,
+                apk_id=None,
+                dest_path=dest_path,
+                source_path=request.artifact.source_path,
+                sha256=hashes.get("sha256"),
+                status=CANONICAL_MATERIALIZATION_FAILED,
+                file_size=dest_path.stat().st_size if dest_path.exists() else None,
+                pulled_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                artifact_label=request.artifact.artifact,
+                is_base=_planned_artifact_is_base(request.artifact, dest_path.name),
+                observed_source_path=request.artifact.source_path,
+                canonical_store_path=None,
+            ),
+            None,
+        )
+
+    canonical_store_path = materialization.store_path
+    canonical_abs = materialization.absolute_path
     apk_id, mirror_failure_reasons = _persist_db_mirror(
         request=request,
         deps=deps,
@@ -133,6 +172,7 @@ def pull_and_record(
         apk_id=apk_id,
         occurrence=occurrence,
         canonical_store_path=canonical_store_path,
+        materialization=materialization,
     )
     _report_success(request, deps, dest_path, apk_id)
 
@@ -216,28 +256,42 @@ def _handle_duplicate(
     return None, "dedupe_sha256"
 
 
+@dataclass(frozen=True)
+class CanonicalMaterialization:
+    store_path: str | None
+    absolute_path: Path | None
+    failure_reason: str | None = None
+    failure_detail: str | None = None
+
+
 def _materialize_canonical_copy(
-    request: ArtifactExecutionRequest,
     deps: ArtifactExecutionDeps,
     dest_path: Path,
     sha256_digest: str,
-) -> tuple[str | None, Path | None]:
-    canonical_store_path: str | None = None
-    canonical_abs: Path | None = None
+) -> CanonicalMaterialization:
+    suffix = dest_path.suffix or ".apk"
     try:
         canonical_path = deps.materialize_apk(
             dest_path,
             sha256_digest=sha256_digest,
-            suffix=dest_path.suffix or ".apk",
+            suffix=suffix,
         )
-        canonical_abs = canonical_path.expanduser().resolve()
+        deps.verify_canonical_apk(sha256_digest, suffix)
+        canonical_abs = canonical_path.expanduser().resolve(strict=False)
         canonical_store_path = deps.repo_relative_path(canonical_path)
-    except Exception as exc:
-        deps.log_warning(
-            f"Failed to materialize canonical APK store entry for {dest_path}: {exc}",
-            "filesystem",
+        if not canonical_store_path:
+            raise RuntimeError("canonical store path was empty after materialization")
+        return CanonicalMaterialization(
+            store_path=canonical_store_path,
+            absolute_path=canonical_abs,
         )
-    return canonical_store_path, canonical_abs
+    except Exception as exc:
+        return CanonicalMaterialization(
+            store_path=None,
+            absolute_path=None,
+            failure_reason=CANONICAL_MATERIALIZATION_FAILED,
+            failure_detail=f"{type(exc).__name__}: {exc}",
+        )
 
 
 def _resolve_signer_fingerprint(
@@ -355,7 +409,9 @@ def _persist_artifact_path(
         request.db_repo.upsert_artifact_path(
             apk_id,
             storage_root_id=request.storage_root_id,
-            local_rel_path=deps.normalise_local_path(request.package_dir / request.artifact.file_name),
+            local_rel_path=deps.normalise_local_path(
+                request.package_dir / request.artifact.file_name
+            ),
             context={
                 **request.base_context,
                 "package_name": request.plan.inventory.package_name,
@@ -422,6 +478,7 @@ def _write_sidecar(
     apk_id: int | None,
     occurrence: int,
     canonical_store_path: str | None,
+    materialization: CanonicalMaterialization | None = None,
 ) -> None:
     artifact_payload = {
         "source_path": request.artifact.source_path,
@@ -435,7 +492,12 @@ def _write_sidecar(
         "artifact": request.artifact.artifact,
         "artifact_kind": "apk",
         "canonical_store_path": canonical_store_path,
+        "canonical_materialization_status": (
+            "failed" if materialization and materialization.failure_reason else "ok"
+        ),
     }
+    if materialization and materialization.failure_detail:
+        extra_meta["canonical_materialization_error"] = materialization.failure_detail
     if request.snapshot_id is not None:
         extra_meta["snapshot_id"] = request.snapshot_id
     if request.snapshot_captured_at:
@@ -483,8 +545,49 @@ def _report_success(
     )
 
 
+def _report_canonical_failure(
+    request: ArtifactExecutionRequest,
+    deps: ArtifactExecutionDeps,
+    dest_path: Path,
+    sha256_digest: str,
+    materialization: CanonicalMaterialization,
+) -> None:
+    session_copy = str(dest_path)
+    deps.print_artifact_status(
+        request.plan.inventory.display_name(),
+        request.artifact.file_name,
+        request.artifact_index,
+        request.artifact_total,
+        "canonical materialization failed; research eligibility blocked",
+        "error",
+    )
+    extra = {
+        "package_name": request.plan.inventory.package_name,
+        "artifact_path": request.artifact.source_path,
+        "file_name": dest_path.name,
+        "sha256": sha256_digest,
+        "session_copy": session_copy,
+        "error": materialization.failure_detail,
+        "research_eligibility": "blocked",
+    }
+    request.emit("error", "harvest.artifact.canonical_materialization_failed", extra=extra)
+    deps.log_error(
+        (
+            "Canonical APK materialization failed: "
+            f"package={request.plan.inventory.package_name} "
+            f"artifact={request.artifact.file_name} "
+            f"sha256={sha256_digest} "
+            f"session_copy={session_copy} "
+            "research eligibility blocked"
+            + (f" ({materialization.failure_detail})" if materialization.failure_detail else "")
+        ),
+        "filesystem",
+    )
+
+
 __all__ = [
     "ArtifactExecutionDeps",
     "ArtifactExecutionRequest",
+    "CanonicalMaterialization",
     "pull_and_record",
 ]

@@ -14,6 +14,7 @@ from scytaledroid.DynamicAnalysis.pcap.security_surface import (
 )
 from scytaledroid.DynamicAnalysis.run_qualification import qualification_fields_from_dataset
 from scytaledroid.DynamicAnalysis.utils.messaging_activity_labels import messaging_activity_label
+from scytaledroid.DynamicAnalysis.utils.path_utils import artifact_relative_path
 from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 
 
@@ -84,7 +85,11 @@ class DynamicRunSummarizer:
             or _safe_int(pcap_report.get("pcap_size_bytes"))
             or capture_bytes
         )
-        static_plan = manifest.target.get("static_plan_summary") if isinstance(manifest.target, dict) else None
+        static_plan = (
+            manifest.target.get("static_plan_summary")
+            if isinstance(manifest.target, dict)
+            else None
+        )
         telemetry_stats = None
         telemetry_counts = None
         telemetry_schema_version = None
@@ -98,10 +103,18 @@ class DynamicRunSummarizer:
         stored_quality = None
         if isinstance(telemetry_stats, dict):
             stored_quality = telemetry_stats.get("network_signal_quality")
-        netstats_rows = int((telemetry_stats or {}).get("netstats_rows") or 0) if telemetry_stats else 0
-        netstats_missing = int((telemetry_stats or {}).get("netstats_missing_rows") or 0) if telemetry_stats else 0
-        netstats_in = (telemetry_stats or {}).get("netstats_bytes_in_total") if telemetry_stats else None
-        netstats_out = (telemetry_stats or {}).get("netstats_bytes_out_total") if telemetry_stats else None
+        netstats_rows = (
+            int((telemetry_stats or {}).get("netstats_rows") or 0) if telemetry_stats else 0
+        )
+        netstats_missing = (
+            int((telemetry_stats or {}).get("netstats_missing_rows") or 0) if telemetry_stats else 0
+        )
+        netstats_in = (
+            (telemetry_stats or {}).get("netstats_bytes_in_total") if telemetry_stats else None
+        )
+        netstats_out = (
+            (telemetry_stats or {}).get("netstats_bytes_out_total") if telemetry_stats else None
+        )
         dataset = manifest.dataset if isinstance(manifest.dataset, dict) else {}
         operator = manifest.operator if isinstance(manifest.operator, dict) else {}
         pcap_size_bytes = _safe_int(dataset.get("pcap_size_bytes")) or pcap_size_bytes
@@ -120,8 +133,14 @@ class DynamicRunSummarizer:
             pcap_failure_detail=pcap_failure_detail,
         )
         invalid_reason = str(dataset.get("invalid_reason_code") or "").strip() or None
-        if not invalid_reason and dataset.get("valid_dataset_run") is True and dataset.get("countable") is False:
-            invalid_reason = str(dataset.get("paper_exclusion_primary_reason_code") or "").strip() or None
+        if (
+            not invalid_reason
+            and dataset.get("valid_dataset_run") is True
+            and dataset.get("countable") is False
+        ):
+            invalid_reason = (
+                str(dataset.get("paper_exclusion_primary_reason_code") or "").strip() or None
+            )
         network_signal_quality = evaluate_network_signal_quality(
             netstats_rows=netstats_rows,
             netstats_missing_rows=netstats_missing,
@@ -137,7 +156,9 @@ class DynamicRunSummarizer:
                 telemetry_quality["netstats_available"] = bool(netstats_available)
         if telemetry_quality.get("netstats_available") is False:
             telemetry_quality["netstats_warning"] = "netstats_unavailable"
-        netstats_missing_rows = int((telemetry_stats or {}).get("netstats_missing_rows") or 0) if telemetry_stats else 0
+        netstats_missing_rows = (
+            int((telemetry_stats or {}).get("netstats_missing_rows") or 0) if telemetry_stats else 0
+        )
         if netstats_missing_rows:
             telemetry_quality["netstats_warning"] = "netstats_missing"
         if network_signal_quality == "netstats_zero_bytes":
@@ -163,7 +184,11 @@ class DynamicRunSummarizer:
         target = manifest.target if isinstance(manifest.target, dict) else {}
         top_dns = pcap_report.get("top_dns") if isinstance(pcap_report.get("top_dns"), list) else []
         top_sni = pcap_report.get("top_sni") if isinstance(pcap_report.get("top_sni"), list) else []
-        top_alpn = fingerprint_summary.get("top_alpn") if isinstance(fingerprint_summary.get("top_alpn"), list) else []
+        top_alpn = (
+            fingerprint_summary.get("top_alpn")
+            if isinstance(fingerprint_summary.get("top_alpn"), list)
+            else []
+        )
         service_family_names = self._service_family_names(service_context)
         quota_window_metrics = (
             pcap_features.get("window_metrics")
@@ -229,7 +254,9 @@ class DynamicRunSummarizer:
             "domains_count": len(destinations),
             "dns_count": _safe_int(pcap_report.get("dns_unique_count")) or len(top_dns),
             "sni_count": _safe_int(pcap_report.get("sni_unique_count")) or len(top_sni),
-            "service_families_observed": ", ".join(service_family_names) if service_family_names else None,
+            "service_families_observed": ", ".join(service_family_names)
+            if service_family_names
+            else None,
             "unique_service_families": len(service_family_names),
             "tls_client_hello_count": _safe_int(fingerprint_summary.get("client_hello_count")),
             "tls_server_hello_count": _safe_int(fingerprint_summary.get("server_hello_count")),
@@ -237,9 +264,15 @@ class DynamicRunSummarizer:
             "unique_ja3s_count": _safe_int(fingerprint_summary.get("unique_ja3s_count")),
             "unique_ja4_count": _safe_int(fingerprint_summary.get("unique_ja4_count")),
             "top_alpn": top_alpn,
-            "top_ja3": fingerprint_summary.get("top_ja3") if isinstance(fingerprint_summary.get("top_ja3"), list) else [],
-            "top_ja3s": fingerprint_summary.get("top_ja3s") if isinstance(fingerprint_summary.get("top_ja3s"), list) else [],
-            "top_ja4": fingerprint_summary.get("top_ja4") if isinstance(fingerprint_summary.get("top_ja4"), list) else [],
+            "top_ja3": fingerprint_summary.get("top_ja3")
+            if isinstance(fingerprint_summary.get("top_ja3"), list)
+            else [],
+            "top_ja3s": fingerprint_summary.get("top_ja3s")
+            if isinstance(fingerprint_summary.get("top_ja3s"), list)
+            else [],
+            "top_ja4": fingerprint_summary.get("top_ja4")
+            if isinstance(fingerprint_summary.get("top_ja4"), list)
+            else [],
             "top_dns": top_dns,
             "top_sni": top_sni,
             "quota_detail": {
@@ -255,7 +288,9 @@ class DynamicRunSummarizer:
             "evidence_qualification": qualification,
             "verdicts": {
                 "technical": dataset_verdict,
-                "protocol": "COMPLIANT" if dataset_verdict == "VALID" else ("NON_COMPLIANT" if dataset_verdict == "INVALID" else None),
+                "protocol": "COMPLIANT"
+                if dataset_verdict == "VALID"
+                else ("NON_COMPLIANT" if dataset_verdict == "INVALID" else None),
                 "cohort": dataset.get("cohort_eligibility"),
             },
             "dataset": dataset,
@@ -348,17 +383,27 @@ class DynamicRunSummarizer:
         capture_sources = capture.get("sources") or []
         capture_sources_text = ", ".join(capture_sources) if capture_sources else "none"
         capture_bytes = capture.get("total_bytes")
-        capture_bytes_text = f"{capture_bytes} bytes" if isinstance(capture_bytes, int) else "unknown"
+        capture_bytes_text = (
+            f"{capture_bytes} bytes" if isinstance(capture_bytes, int) else "unknown"
+        )
         capture_mode = capture.get("capture_mode") or "unknown"
         pcap_valid = capture.get("pcap_valid")
         pcap_valid_text = self._bool_text(pcap_valid)
         target = summary.get("target", {}) or {}
         quota_detail = summary.get("quota_detail", {}) or {}
         indicators = summary.get("indicators", {}) or {}
-        cleartext_http_text = self._bool_text(summary.get("flags", {}).get("cleartext_http_detected"))
-        cleartext_protocol_text = self._bool_text(summary.get("flags", {}).get("cleartext_protocol_detected"))
-        network_capture_text = self._bool_text(summary.get("flags", {}).get("network_capture_present"))
-        static_watchlist_text = self._bool_text(summary.get("flags", {}).get("static_watchlist_used"))
+        cleartext_http_text = self._bool_text(
+            summary.get("flags", {}).get("cleartext_http_detected")
+        )
+        cleartext_protocol_text = self._bool_text(
+            summary.get("flags", {}).get("cleartext_protocol_detected")
+        )
+        network_capture_text = self._bool_text(
+            summary.get("flags", {}).get("network_capture_present")
+        )
+        static_watchlist_text = self._bool_text(
+            summary.get("flags", {}).get("static_watchlist_used")
+        )
         invalid_reason_text = self._display_text(quota_detail.get("invalid_reason_code"))
         top_dns = indicators.get("top_dns") or []
         top_sni = indicators.get("top_sni") or []
@@ -434,7 +479,9 @@ class DynamicRunSummarizer:
             if call_connected_count is not None:
                 call_lines.append(f"- Operator connected attempts: {call_connected_count}.")
             if call_not_connected_count is not None:
-                call_lines.append(f"- Operator no-connect/ringing attempts: {call_not_connected_count}.")
+                call_lines.append(
+                    f"- Operator no-connect/ringing attempts: {call_not_connected_count}."
+                )
             if call_canceled_count is not None:
                 call_lines.append(f"- Operator canceled attempts: {call_canceled_count}.")
             if summary.get("call_outcome_summary"):
@@ -503,7 +550,9 @@ class DynamicRunSummarizer:
         if dataset.get("countable") is True:
             return f"YES ({str(run_profile or 'dataset').strip() or 'dataset'})"
         profile_lc = str(run_profile or "").strip().lower()
-        exclusion_reason = str(dataset.get("paper_exclusion_primary_reason_code") or "").strip().upper()
+        exclusion_reason = (
+            str(dataset.get("paper_exclusion_primary_reason_code") or "").strip().upper()
+        )
         cohort_eligibility = str(dataset.get("cohort_eligibility") or "").strip().upper()
         if dataset.get("low_signal") is True and profile_lc == "baseline_idle":
             return "NO (LOW_SIGNAL_IDLE)"
@@ -527,7 +576,9 @@ class DynamicRunSummarizer:
         if dataset.get("countable") is True:
             return None
         profile_lc = str(run_profile or "").strip().lower()
-        exclusion_reason = str(dataset.get("paper_exclusion_primary_reason_code") or "").strip().upper()
+        exclusion_reason = (
+            str(dataset.get("paper_exclusion_primary_reason_code") or "").strip().upper()
+        )
         cohort_eligibility = str(dataset.get("cohort_eligibility") or "").strip().upper()
         if dataset.get("low_signal") is True and profile_lc == "baseline_idle":
             return "LOW_SIGNAL_IDLE"
@@ -598,7 +649,8 @@ class DynamicRunSummarizer:
             call_connected_count = (
                 1
                 if call_connected is True
-                or outcome_reason in {"CALL_CONNECTED_OK", "CALL_CONNECTED_SHORT", "CALL_MEDIA_OBSERVED"}
+                or outcome_reason
+                in {"CALL_CONNECTED_OK", "CALL_CONNECTED_SHORT", "CALL_MEDIA_OBSERVED"}
                 else 0
                 if call_attempt_count is not None
                 else None
@@ -644,7 +696,8 @@ class DynamicRunSummarizer:
             "call_connected_duration_s": duration_s,
             "call_outcome_reason": outcome_reason,
             "call_outcome_flag": operator.get("call_outcome_flag"),
-            "call_primary_outcome_reason": operator.get("call_primary_outcome_reason") or outcome_reason,
+            "call_primary_outcome_reason": operator.get("call_primary_outcome_reason")
+            or outcome_reason,
             "call_attempt_count": call_attempt_count,
             "call_connected_count": call_connected_count,
             "call_not_connected_count": call_not_connected_count,
@@ -656,7 +709,9 @@ class DynamicRunSummarizer:
                 "call_activity_inferred_from_foreground"
             ),
             "call_activity_original_tag": operator.get("call_activity_original_tag"),
-            "call_activity_foreground_component": operator.get("call_activity_foreground_component"),
+            "call_activity_foreground_component": operator.get(
+                "call_activity_foreground_component"
+            ),
         }
 
     def _pcap_failure_detail(
@@ -667,11 +722,16 @@ class DynamicRunSummarizer:
         pcap_size_bytes: int,
     ) -> str | None:
         raw = str(dataset.get("pcap_failure_detail") or "").strip()
-        if dataset.get("valid_dataset_run") is True and not str(dataset.get("invalid_reason_code") or "").strip():
+        if (
+            dataset.get("valid_dataset_run") is True
+            and not str(dataset.get("invalid_reason_code") or "").strip()
+        ):
             return raw or None
         pcap_valid = pcap_meta.get("pcap_valid")
         size = int(pcap_size_bytes or 0)
-        min_pcap_bytes = _safe_int(pcap_meta.get("min_pcap_bytes")) or _safe_int(dataset.get("min_pcap_bytes"))
+        min_pcap_bytes = _safe_int(pcap_meta.get("min_pcap_bytes")) or _safe_int(
+            dataset.get("min_pcap_bytes")
+        )
         observed_too_small = (
             pcap_valid is False and size > 0 and min_pcap_bytes > 0 and size < min_pcap_bytes
         )
@@ -704,7 +764,7 @@ class DynamicRunSummarizer:
     def _artifact_record(self, path: Path, artifact_type: str, produced_by: str) -> ArtifactRecord:
         sha256 = self.writer.hash_file(path)
         return ArtifactRecord(
-            relative_path=str(path.relative_to(self.writer.run_dir)),
+            relative_path=artifact_relative_path(self.writer.run_dir, path),
             type=artifact_type,
             sha256=sha256,
             size_bytes=path.stat().st_size,
@@ -713,7 +773,9 @@ class DynamicRunSummarizer:
             pull_status="n/a",
         )
 
-    def _load_destinations(self, manifest: RunManifest, pcap_report: dict[str, Any] | None = None) -> list[str]:
+    def _load_destinations(
+        self, manifest: RunManifest, pcap_report: dict[str, Any] | None = None
+    ) -> list[str]:
         for artifact in manifest.artifacts:
             if artifact.type != "network_flow_summary":
                 continue
@@ -760,7 +822,9 @@ class DynamicRunSummarizer:
             return {}
         return compute_static_dynamic_cleartext_posture(plan, pcap_report)
 
-    def _fingerprint_summary(self, report: dict[str, Any], features: dict[str, Any]) -> dict[str, Any]:
+    def _fingerprint_summary(
+        self, report: dict[str, Any], features: dict[str, Any]
+    ) -> dict[str, Any]:
         report_tls = report.get("tls_fingerprints")
         if isinstance(report_tls, dict):
             report_summary = report_tls.get("summary")
@@ -890,7 +954,9 @@ class DynamicRunSummarizer:
         except (TypeError, ValueError):
             return str(value)
 
-    def _detect_cleartext(self, destinations: list[str], pcap_report: dict[str, Any] | None = None) -> str:
+    def _detect_cleartext(
+        self, destinations: list[str], pcap_report: dict[str, Any] | None = None
+    ) -> str:
         from_surface = self._cleartext_from_security_surface(pcap_report or {})
         if from_surface is not None:
             return from_surface
@@ -1076,7 +1142,10 @@ class DynamicRunSummarizer:
                         "elapsed_s": _safe_int(details.get("elapsed_s")),
                         "surface_label": label,
                         "surface_detail": str(details.get("surface_detail") or "").strip() or None,
-                        "foreground_component": str(details.get("foreground_component") or "").strip() or None,
+                        "foreground_component": str(
+                            details.get("foreground_component") or ""
+                        ).strip()
+                        or None,
                     }
                 )
         except OSError:
@@ -1162,7 +1231,9 @@ class DynamicRunSummarizer:
                 candidate_exists = False
                 candidate_size = None
         elif not pcap_artifact_present:
-            for candidate in (self.writer.run_dir / "artifacts" / "pcapdroid_capture").glob("*.pcap*"):
+            for candidate in (self.writer.run_dir / "artifacts" / "pcapdroid_capture").glob(
+                "*.pcap*"
+            ):
                 if not candidate.is_file():
                     continue
                 try:

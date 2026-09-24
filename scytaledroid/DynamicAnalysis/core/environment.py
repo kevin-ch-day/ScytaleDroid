@@ -1,10 +1,8 @@
 """Environment management for dynamic analysis runs.
 
-Paper #2 integrity posture:
-- Evidence packs are authoritative.
-- Freeze manifest checksums are the immutability anchor.
-- Per-artifact sha256 values in run_manifest.json are best-effort audit aids and should
-  be omitted for artifacts that may be enriched/rewritten later.
+Prospective V2 integrity posture: producers may defer hashes during collection;
+the canonical sealer hashes retained files after writers stop. Post-seal
+enrichment must use a separate sidecar. Historical V1 freeze rules remain recorded.
 """
 
 from __future__ import annotations
@@ -18,6 +16,7 @@ from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.utils.path_utils import artifact_relative_path
 
 
 @dataclass(frozen=True)
@@ -82,9 +81,11 @@ class EnvironmentManager:
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         return path
 
-    def _artifact_record(self, run_ctx: RunContext, path: Path, artifact_type: str) -> ArtifactRecord:
+    def _artifact_record(
+        self, run_ctx: RunContext, path: Path, artifact_type: str
+    ) -> ArtifactRecord:
         return ArtifactRecord(
-            relative_path=str(path.relative_to(run_ctx.run_dir)),
+            relative_path=artifact_relative_path(run_ctx.run_dir, path),
             type=artifact_type,
             sha256=None,
             size_bytes=path.stat().st_size,

@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+CANONICAL_MATERIALIZATION_FAILED = "canonical_materialization_failed"
+
 
 @dataclass(frozen=True)
 class InventoryRow:
@@ -107,10 +109,14 @@ class ArtifactResult:
 
 @dataclass
 class ArtifactError:
-    """Details for an artifact that failed to pull."""
+    """Details for an artifact that failed to pull or persist durably."""
 
     source_path: str
     reason: str
+    sha256: str | None = None
+    session_copy: str | None = None
+    file_name: str | None = None
+    detail: str | None = None
 
 
 @dataclass

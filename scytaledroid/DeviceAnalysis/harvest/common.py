@@ -38,7 +38,11 @@ def package_evidence_leaf_name(inventory: InventoryRow) -> str:
 
     app = (inventory.app_label or "").strip()
     if not app:
-        tail = inventory.package_name.rsplit(".", 1)[-1] if "." in inventory.package_name else inventory.package_name
+        tail = (
+            inventory.package_name.rsplit(".", 1)[-1]
+            if "." in inventory.package_name
+            else inventory.package_name
+        )
         app = str(tail).strip() or "app"
     safe_app = _harvest_evidence_slug(app, default="app", max_len=56)
     vc = _harvest_evidence_slug(str(inventory.version_code or ""), default="unknown", max_len=28)
@@ -54,7 +58,11 @@ def package_evidence_leaf_name(inventory: InventoryRow) -> str:
 def package_evidence_dir(dest_root: Path, inventory: InventoryRow) -> Path:
     """Per-package directory: ``<dest_root>/<package>/<app>_v<code>_<versionName>/``."""
 
-    return dest_root / _safe_package_dir_name(inventory.package_name) / package_evidence_leaf_name(inventory)
+    return (
+        dest_root
+        / _safe_package_dir_name(inventory.package_name)
+        / package_evidence_leaf_name(inventory)
+    )
 
 
 def _safe_package_dir_name(package_name: str) -> str:
@@ -101,6 +109,8 @@ DEFAULT_META_FIELDS: tuple[str, ...] = (
     "artifact",
     "artifact_kind",
     "canonical_store_path",
+    "canonical_materialization_status",
+    "canonical_materialization_error",
 )
 
 

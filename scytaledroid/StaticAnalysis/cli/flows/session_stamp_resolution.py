@@ -8,30 +8,59 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 from ...session import normalize_session_stamp
 
-
-def _existing_db_session_labels(base_stamp: str) -> list[str]:
-    try:
-        from scytaledroid.Database.db_core import db_queries as core_q
-
-        rows = core_q.run_sql(
-            """
-            SELECT DISTINCT COALESCE(NULLIF(TRIM(session_label), ''), NULLIF(TRIM(session_stamp), ''))
+# static_analysis_sessions.session_stamp is utf8mb4_unicode_ci while sibling
+# session_label/stamp columns are utf8mb4_general_ci. UNION/COALESCE without an
+# explicit collation raises MariaDB 1271 and blocked "use new session label".
+EXISTING_SESSION_LABELS_SQL = """
+            SELECT DISTINCT COALESCE(
+                NULLIF(TRIM(session_label COLLATE utf8mb4_unicode_ci), ''),
+                NULLIF(TRIM(session_stamp COLLATE utf8mb4_unicode_ci), '')
+            )
             FROM static_analysis_runs
-            WHERE session_label=%s OR session_label LIKE %s OR session_stamp=%s OR session_stamp LIKE %s
+            WHERE session_label COLLATE utf8mb4_unicode_ci = %s
+               OR session_label COLLATE utf8mb4_unicode_ci LIKE %s
+               OR session_stamp COLLATE utf8mb4_unicode_ci = %s
+               OR session_stamp COLLATE utf8mb4_unicode_ci LIKE %s
             UNION
-            SELECT DISTINCT COALESCE(NULLIF(TRIM(session_label), ''), NULLIF(TRIM(session_stamp), ''))
+            SELECT DISTINCT COALESCE(
+                NULLIF(TRIM(session_label COLLATE utf8mb4_unicode_ci), ''),
+                NULLIF(TRIM(session_stamp COLLATE utf8mb4_unicode_ci), '')
+            )
             FROM static_analysis_sessions
-            WHERE session_label=%s OR session_label LIKE %s OR session_stamp=%s OR session_stamp LIKE %s
-            """,
-            (base_stamp, f"{base_stamp}-%", base_stamp, f"{base_stamp}-%") * 2,
-            fetch="all",
-        ) or []
+            WHERE session_label COLLATE utf8mb4_unicode_ci = %s
+               OR session_label COLLATE utf8mb4_unicode_ci LIKE %s
+               OR session_stamp COLLATE utf8mb4_unicode_ci = %s
+               OR session_stamp COLLATE utf8mb4_unicode_ci LIKE %s
+            """
+
+
+def _existing_db_session_labels(base_stamp: str, *, run_sql: Any | None = None) -> list[str]:
+    executor = run_sql
+    if executor is None:
+        try:
+            from scytaledroid.Database.db_core import db_queries as core_q
+
+            executor = core_q.run_sql
+        except Exception as exc:
+            raise RuntimeError(
+                "persistent session state cannot be inspected (database query helper unavailable)"
+            ) from exc
+    try:
+        rows = (
+            executor(
+                EXISTING_SESSION_LABELS_SQL,
+                (base_stamp, f"{base_stamp}-%", base_stamp, f"{base_stamp}-%") * 2,
+                fetch="all",
+            )
+            or []
+        )
     except Exception as exc:
         raise RuntimeError(
             "persistent session state cannot be inspected; refusing normal static execution"
@@ -106,7 +135,9 @@ def resolve_unique_session_stamp(
             (base_stamp, base_stamp),
             fetch="one",
         )
-        has_persistent_header = bool(header_row and header_row[0] is not None and int(header_row[0]) > 0)
+        has_persistent_header = bool(
+            header_row and header_row[0] is not None and int(header_row[0]) > 0
+        )
     except Exception as exc:
         raise RuntimeError(
             "persistent session state cannot be inspected; refusing normal static execution"
@@ -135,19 +166,20 @@ def resolve_unique_session_stamp(
     # resolve collisions into a canonical_action and/or a unique session_stamp.
     action = (canonical_action or "").strip().lower()
     if action in {"append", "auto_suffix"}:
-        suffix = str(next_suffix) if next_suffix is not None else datetime.now(UTC).strftime("%H%M%S")
+        suffix = (
+            str(next_suffix) if next_suffix is not None else datetime.now(UTC).strftime("%H%M%S")
+        )
         new_stamp = normalize_session_stamp(f"{base_stamp}-{suffix}")
         return new_stamp, new_stamp, "append"
     if action == "":
-        suffix = str(next_suffix) if next_suffix is not None else datetime.now(UTC).strftime("%H%M%S")
+        suffix = (
+            str(next_suffix) if next_suffix is not None else datetime.now(UTC).strftime("%H%M%S")
+        )
         new_stamp = normalize_session_stamp(f"{base_stamp}-{suffix}")
         if not quiet:
             print(
                 status_messages.status(
-                    (
-                        f"Session label {base_stamp} already exists; "
-                        f"auto-suffixing to {new_stamp}."
-                    ),
+                    (f"Session label {base_stamp} already exists; auto-suffixing to {new_stamp}."),
                     level="warn",
                 )
             )

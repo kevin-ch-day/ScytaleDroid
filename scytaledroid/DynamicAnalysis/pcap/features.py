@@ -27,6 +27,7 @@ from scytaledroid.DynamicAnalysis.pcap.enrichment_outcome import (
 from scytaledroid.DynamicAnalysis.pcap.identity import ensure_features_capture_identity
 from scytaledroid.DynamicAnalysis.pcap.posture import summarize_traffic_posture
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
+from scytaledroid.DynamicAnalysis.utils.path_utils import artifact_relative_path
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,12 @@ def write_pcap_features(
         features,
         dynamic_run_id=manifest.dynamic_run_id,
         package_name=str((manifest.target or {}).get("package_name") or "").strip() or None,
-        app_label=str((manifest.target or {}).get("display_name") or (manifest.target or {}).get("app_label") or "").strip() or None,
+        app_label=str(
+            (manifest.target or {}).get("display_name")
+            or (manifest.target or {}).get("app_label")
+            or ""
+        ).strip()
+        or None,
         report=report,
     )
     _refresh_traffic_posture(features)
@@ -77,7 +83,7 @@ def write_pcap_features(
     output_path = run_dir / "analysis/pcap_features.json"
     output_path.write_text(json.dumps(features, indent=2, sort_keys=True), encoding="utf-8")
     return ArtifactRecord(
-        relative_path=str(output_path.relative_to(run_dir)),
+        relative_path=artifact_relative_path(run_dir, output_path),
         type="pcap_features",
         sha256=_sha256(output_path),
         size_bytes=output_path.stat().st_size,
@@ -95,7 +101,11 @@ def _extract_features(
     target: dict[str, Any] | None = None,
     dynamic_run_id: str | None = None,
 ) -> dict[str, Any]:
-    package_name = str((target or {}).get("package_name") or (target or {}).get("package") or "").strip().lower()
+    package_name = (
+        str((target or {}).get("package_name") or (target or {}).get("package") or "")
+        .strip()
+        .lower()
+    )
     capinfos = (report.get("capinfos") or {}).get("parsed") or {}
     packet_count = _safe_int(capinfos.get("packet_count"))
     data_bytes = _safe_int(capinfos.get("data_size_bytes"))
@@ -186,7 +196,9 @@ def _extract_features(
     tls_ratio = _bounded_ratio(tls_bytes_capped, tcp_bytes)
 
     # Domain diversity proxy (top-N limited; full domain list lives in overlap report).
-    unique_domains_topn = len({str(item.get("value")).strip() for item in (top_sni + top_dns) if item.get("value")})
+    unique_domains_topn = len(
+        {str(item.get("value")).strip() for item in (top_sni + top_dns) if item.get("value")}
+    )
     # Report-level totals (computed in pcap_report.json when tshark is available).
     sni_obs = _safe_int(report.get("sni_observation_count"))
     dns_obs = _safe_int(report.get("dns_observation_count"))
@@ -213,37 +225,64 @@ def _extract_features(
             new_sni_rate_per_min = None
             new_dns_rate_per_min = None
     transport_health = report.get("transport_health") or {}
-    issue_packet_ratio = _safe_float(transport_health.get("issue_packet_ratio")) if isinstance(transport_health, dict) else None
-    reset_packet_ratio = _safe_float(transport_health.get("reset_packet_ratio")) if isinstance(transport_health, dict) else None
+    issue_packet_ratio = (
+        _safe_float(transport_health.get("issue_packet_ratio"))
+        if isinstance(transport_health, dict)
+        else None
+    )
+    reset_packet_ratio = (
+        _safe_float(transport_health.get("reset_packet_ratio"))
+        if isinstance(transport_health, dict)
+        else None
+    )
     lifecycle_summary = (
         transport_health.get("lifecycle_summary")
-        if isinstance(transport_health, dict) and isinstance(transport_health.get("lifecycle_summary"), dict)
+        if isinstance(transport_health, dict)
+        and isinstance(transport_health.get("lifecycle_summary"), dict)
         else {}
     )
     fingerprint_summary = (
-        report.get("tls_fingerprints")
-        if isinstance(report.get("tls_fingerprints"), dict)
-        else {}
+        report.get("tls_fingerprints") if isinstance(report.get("tls_fingerprints"), dict) else {}
     )
     context_bundle = summarize_pcap_service_context(report, package_name=package_name)
     service_context = context_bundle.get("service_context") or {}
     service_signals = context_bundle.get("service_signals") or {}
     media_plane = report.get("media_plane") if isinstance(report.get("media_plane"), dict) else {}
-    media_plane_summary = media_plane.get("summary") if isinstance(media_plane.get("summary"), dict) else {}
-    startup_profile = report.get("startup_profile") if isinstance(report.get("startup_profile"), dict) else {}
+    media_plane_summary = (
+        media_plane.get("summary") if isinstance(media_plane.get("summary"), dict) else {}
+    )
+    startup_profile = (
+        report.get("startup_profile") if isinstance(report.get("startup_profile"), dict) else {}
+    )
     dominant_udp_flow = (
         media_plane_summary.get("dominant_udp_flow")
         if isinstance(media_plane_summary.get("dominant_udp_flow"), dict)
         else {}
     )
-    owner_hits = service_context.get("owner_class_hit_counts") if isinstance(service_context, dict) else {}
-    focus_hits = service_signals.get("focus_area_hit_counts") if isinstance(service_signals, dict) else {}
-    severity_hits = service_signals.get("severity_hit_counts") if isinstance(service_signals, dict) else {}
-    surface = report.get("security_surface") if isinstance(report.get("security_surface"), dict) else {}
-    cleartext_surface = surface.get("cleartext") if isinstance(surface.get("cleartext"), dict) else {}
-    dns_surface = surface.get("dns_anomalies") if isinstance(surface.get("dns_anomalies"), dict) else {}
+    owner_hits = (
+        service_context.get("owner_class_hit_counts") if isinstance(service_context, dict) else {}
+    )
+    focus_hits = (
+        service_signals.get("focus_area_hit_counts") if isinstance(service_signals, dict) else {}
+    )
+    severity_hits = (
+        service_signals.get("severity_hit_counts") if isinstance(service_signals, dict) else {}
+    )
+    surface = (
+        report.get("security_surface") if isinstance(report.get("security_surface"), dict) else {}
+    )
+    cleartext_surface = (
+        surface.get("cleartext") if isinstance(surface.get("cleartext"), dict) else {}
+    )
+    dns_surface = (
+        surface.get("dns_anomalies") if isinstance(surface.get("dns_anomalies"), dict) else {}
+    )
     tls_surface = surface.get("tls_surface") if isinstance(surface.get("tls_surface"), dict) else {}
-    threat_surface = surface.get("threat_heuristics") if isinstance(surface.get("threat_heuristics"), dict) else {}
+    threat_surface = (
+        surface.get("threat_heuristics")
+        if isinstance(surface.get("threat_heuristics"), dict)
+        else {}
+    )
     surface_ok = str(surface.get("status") or "") == "ok"
     return {
         # Backwards-compatible feature schema tag (Paper #2). New keys must only be
@@ -287,7 +326,9 @@ def _extract_features(
             "tcp_issue_packet_ratio": issue_packet_ratio,
             "tcp_reset_packet_ratio": reset_packet_ratio,
             "tcp_reset_stream_ratio": _safe_float(lifecycle_summary.get("reset_stream_ratio")),
-            "tcp_clean_close_stream_ratio": _safe_float(lifecycle_summary.get("clean_close_stream_ratio")),
+            "tcp_clean_close_stream_ratio": _safe_float(
+                lifecycle_summary.get("clean_close_stream_ratio")
+            ),
             "tcp_partial_stream_ratio": _safe_float(lifecycle_summary.get("partial_stream_ratio")),
             "tcp_issue_stream_ratio": _safe_float(lifecycle_summary.get("issue_stream_ratio")),
             "tls_client_hello_count": _safe_int(fingerprint_summary.get("client_hello_count")),
@@ -298,17 +339,35 @@ def _extract_features(
             "top1_ja3_share": _safe_float(fingerprint_summary.get("top1_ja3_share")),
             "top1_ja4_share": _safe_float(fingerprint_summary.get("top1_ja4_share")),
             "top1_ja3s_share": _safe_float(fingerprint_summary.get("top1_ja3s_share")),
-            "first_party_service_hits": _safe_int((owner_hits or {}).get("first_party")) if isinstance(owner_hits, dict) else None,
-            "third_party_service_hits": _safe_int((owner_hits or {}).get("third_party")) if isinstance(owner_hits, dict) else None,
-            "privacy_signal_hits": _safe_int((focus_hits or {}).get("privacy")) if isinstance(focus_hits, dict) else None,
-            "high_severity_signal_hits": _safe_int((severity_hits or {}).get("high")) if isinstance(severity_hits, dict) else None,
+            "first_party_service_hits": _safe_int((owner_hits or {}).get("first_party"))
+            if isinstance(owner_hits, dict)
+            else None,
+            "third_party_service_hits": _safe_int((owner_hits or {}).get("third_party"))
+            if isinstance(owner_hits, dict)
+            else None,
+            "privacy_signal_hits": _safe_int((focus_hits or {}).get("privacy"))
+            if isinstance(focus_hits, dict)
+            else None,
+            "high_severity_signal_hits": _safe_int((severity_hits or {}).get("high"))
+            if isinstance(severity_hits, dict)
+            else None,
             "stun_frame_count": _safe_int(media_plane_summary.get("stun_frame_count")),
-            "stun_frame_share_of_udp": _safe_float(media_plane_summary.get("stun_frame_share_of_udp")),
-            "turn_allocate_request_count": _safe_int(media_plane_summary.get("turn_allocate_request_count")),
-            "turn_allocate_success_count": _safe_int(media_plane_summary.get("turn_allocate_success_count")),
+            "stun_frame_share_of_udp": _safe_float(
+                media_plane_summary.get("stun_frame_share_of_udp")
+            ),
+            "turn_allocate_request_count": _safe_int(
+                media_plane_summary.get("turn_allocate_request_count")
+            ),
+            "turn_allocate_success_count": _safe_int(
+                media_plane_summary.get("turn_allocate_success_count")
+            ),
             "relay_endpoint_count": _safe_int(media_plane_summary.get("relay_endpoint_count")),
-            "rtc_flow_candidate_count": _safe_int(media_plane_summary.get("rtc_flow_candidate_count")),
-            "rtc_sustained_session_count": _safe_int(media_plane_summary.get("rtc_sustained_session_count")),
+            "rtc_flow_candidate_count": _safe_int(
+                media_plane_summary.get("rtc_flow_candidate_count")
+            ),
+            "rtc_sustained_session_count": _safe_int(
+                media_plane_summary.get("rtc_sustained_session_count")
+            ),
             "rtc_total_bytes": _safe_int(media_plane_summary.get("rtc_total_bytes")),
             "rtc_total_packets": _safe_int(media_plane_summary.get("rtc_total_packets")),
             "rtc_stun_packet_count": _safe_int(media_plane_summary.get("rtc_stun_packet_count")),
@@ -317,39 +376,101 @@ def _extract_features(
             "rtc_srtcp_packet_count": _safe_int(media_plane_summary.get("rtc_srtcp_packet_count")),
             "rtc_quic_packet_count": _safe_int(media_plane_summary.get("rtc_quic_packet_count")),
             "rtc_max_session_bytes": _safe_int(media_plane_summary.get("rtc_max_session_bytes")),
-            "rtc_max_session_duration_s": _safe_float(media_plane_summary.get("rtc_max_session_duration_s")),
+            "rtc_max_session_duration_s": _safe_float(
+                media_plane_summary.get("rtc_max_session_duration_s")
+            ),
             "rtc_relay_peer_count": _safe_int(media_plane_summary.get("rtc_relay_peer_count")),
-            "dominant_udp_flow_bytes": _safe_int(dominant_udp_flow.get("bytes")) if isinstance(dominant_udp_flow, dict) else None,
-            "dominant_udp_flow_share": _safe_float(dominant_udp_flow.get("share_of_udp_bytes")) if isinstance(dominant_udp_flow, dict) else None,
-            "relay_media_detected": 1 if media_plane_summary.get("relay_media_likely") else 0 if media_plane else None,
-            "rtc_call_observed": 1 if media_plane_summary.get("rtc_call_observed") else 0 if media_plane else None,
-            "rtc_multi_session_observed": 1 if media_plane_summary.get("rtc_multi_session_observed") else 0 if media_plane else None,
+            "dominant_udp_flow_bytes": _safe_int(dominant_udp_flow.get("bytes"))
+            if isinstance(dominant_udp_flow, dict)
+            else None,
+            "dominant_udp_flow_share": _safe_float(dominant_udp_flow.get("share_of_udp_bytes"))
+            if isinstance(dominant_udp_flow, dict)
+            else None,
+            "relay_media_detected": 1
+            if media_plane_summary.get("relay_media_likely")
+            else 0
+            if media_plane
+            else None,
+            "rtc_call_observed": 1
+            if media_plane_summary.get("rtc_call_observed")
+            else 0
+            if media_plane
+            else None,
+            "rtc_multi_session_observed": 1
+            if media_plane_summary.get("rtc_multi_session_observed")
+            else 0
+            if media_plane
+            else None,
             "startup_byte_share": _safe_float(startup_profile.get("startup_byte_share")),
             "startup_packet_share": _safe_float(startup_profile.get("startup_packet_share")),
-            "post_start_median_bytes_per_min": _safe_float(startup_profile.get("post_start_median_bytes_per_min")),
-            "post_start_mean_bytes_per_min": _safe_float(startup_profile.get("post_start_mean_bytes_per_min")),
-            "post_start_median_packets_per_min": _safe_float(startup_profile.get("post_start_median_packets_per_min")),
-            "post_start_mean_packets_per_min": _safe_float(startup_profile.get("post_start_mean_packets_per_min")),
-            "startup_dominant": 1 if startup_profile.get("startup_dominant") else 0 if startup_profile else None,
-            "security_finding_count": _safe_int(surface.get("finding_count")) if surface_ok else None,
-            "security_risk_flag_count": len(surface.get("risk_flags") or []) if surface_ok else None,
-            "cleartext_http_observed": 1 if cleartext_surface.get("http_observed") else 0 if surface_ok else None,
+            "post_start_median_bytes_per_min": _safe_float(
+                startup_profile.get("post_start_median_bytes_per_min")
+            ),
+            "post_start_mean_bytes_per_min": _safe_float(
+                startup_profile.get("post_start_mean_bytes_per_min")
+            ),
+            "post_start_median_packets_per_min": _safe_float(
+                startup_profile.get("post_start_median_packets_per_min")
+            ),
+            "post_start_mean_packets_per_min": _safe_float(
+                startup_profile.get("post_start_mean_packets_per_min")
+            ),
+            "startup_dominant": 1
+            if startup_profile.get("startup_dominant")
+            else 0
+            if startup_profile
+            else None,
+            "security_finding_count": _safe_int(surface.get("finding_count"))
+            if surface_ok
+            else None,
+            "security_risk_flag_count": len(surface.get("risk_flags") or [])
+            if surface_ok
+            else None,
+            "cleartext_http_observed": 1
+            if cleartext_surface.get("http_observed")
+            else 0
+            if surface_ok
+            else None,
             "cleartext_protocol_observed": (
-                1 if cleartext_surface.get("cleartext_protocol_observed") else 0 if surface_ok else None
+                1
+                if cleartext_surface.get("cleartext_protocol_observed")
+                else 0
+                if surface_ok
+                else None
             ),
             "plaintext_protocols_observed": (
-                ";".join(cleartext_surface.get("plaintext_protocols_observed") or []) if surface_ok else None
+                ";".join(cleartext_surface.get("plaintext_protocols_observed") or [])
+                if surface_ok
+                else None
             ),
             "decoded_protocols_observed": (
-                ";".join(cleartext_surface.get("decoded_protocols_observed") or []) if surface_ok else None
+                ";".join(cleartext_surface.get("decoded_protocols_observed") or [])
+                if surface_ok
+                else None
             ),
-            "plaintext_protocol_frames": _safe_int(cleartext_surface.get("plaintext_protocol_frames")) if surface_ok else None,
-            "dns_nxdomain_responses": _safe_int(dns_surface.get("nxdomain_responses")) if surface_ok else None,
+            "plaintext_protocol_frames": _safe_int(
+                cleartext_surface.get("plaintext_protocol_frames")
+            )
+            if surface_ok
+            else None,
+            "dns_nxdomain_responses": _safe_int(dns_surface.get("nxdomain_responses"))
+            if surface_ok
+            else None,
             "dns_txt_queries": _safe_int(dns_surface.get("txt_queries")) if surface_ok else None,
-            "tls_alert_count": _safe_int(tls_surface.get("tls_alert_count")) if surface_ok else None,
-            "tls_self_signed_count": _safe_int(tls_surface.get("self_signed_count")) if surface_ok else None,
-            "security_heuristic_score": _safe_int(threat_surface.get("heuristic_score")) if surface_ok else None,
-            "decoded_cleartext_stream_count": _safe_int(cleartext_surface.get("decoded_stream_count")) if surface_ok else None,
+            "tls_alert_count": _safe_int(tls_surface.get("tls_alert_count"))
+            if surface_ok
+            else None,
+            "tls_self_signed_count": _safe_int(tls_surface.get("self_signed_count"))
+            if surface_ok
+            else None,
+            "security_heuristic_score": _safe_int(threat_surface.get("heuristic_score"))
+            if surface_ok
+            else None,
+            "decoded_cleartext_stream_count": _safe_int(
+                cleartext_surface.get("decoded_stream_count")
+            )
+            if surface_ok
+            else None,
         },
         "quality": {
             "report_status": report.get("report_status"),
@@ -402,23 +523,33 @@ def _extract_features(
             "summary": {},
         },
         "fingerprints": {
-            "status": "ok" if isinstance(fingerprint_summary, dict) and fingerprint_summary else "not_attempted",
+            "status": "ok"
+            if isinstance(fingerprint_summary, dict) and fingerprint_summary
+            else "not_attempted",
             "summary": fingerprint_summary if isinstance(fingerprint_summary, dict) else {},
         },
         "transport_health": {
-            "status": "from_report" if isinstance(transport_health, dict) and transport_health else "not_attempted",
+            "status": "from_report"
+            if isinstance(transport_health, dict) and transport_health
+            else "not_attempted",
             "summary": transport_health if isinstance(transport_health, dict) else {},
         },
         "service_context": {
-            "status": str(service_context.get("status") or "not_attempted") if isinstance(service_context, dict) else "not_attempted",
+            "status": str(service_context.get("status") or "not_attempted")
+            if isinstance(service_context, dict)
+            else "not_attempted",
             "summary": service_context if isinstance(service_context, dict) else {},
         },
         "service_signals": {
-            "status": str(service_signals.get("status") or "not_attempted") if isinstance(service_signals, dict) else "not_attempted",
+            "status": str(service_signals.get("status") or "not_attempted")
+            if isinstance(service_signals, dict)
+            else "not_attempted",
             "summary": service_signals if isinstance(service_signals, dict) else {},
         },
         "media_plane": {
-            "status": str(media_plane.get("status") or "not_attempted") if isinstance(media_plane, dict) else "not_attempted",
+            "status": str(media_plane.get("status") or "not_attempted")
+            if isinstance(media_plane, dict)
+            else "not_attempted",
             "summary": media_plane_summary if isinstance(media_plane_summary, dict) else {},
         },
         "security_surface": {
@@ -429,8 +560,12 @@ def _extract_features(
                 "cleartext_visibility_class": cleartext_surface.get("visibility_class"),
                 "http_observed": cleartext_surface.get("http_observed"),
                 "cleartext_protocol_observed": cleartext_surface.get("cleartext_protocol_observed"),
-                "plaintext_protocols_observed": cleartext_surface.get("plaintext_protocols_observed") or [],
-                "decoded_protocols_observed": cleartext_surface.get("decoded_protocols_observed") or [],
+                "plaintext_protocols_observed": cleartext_surface.get(
+                    "plaintext_protocols_observed"
+                )
+                or [],
+                "decoded_protocols_observed": cleartext_surface.get("decoded_protocols_observed")
+                or [],
                 "decoded_stream_count": cleartext_surface.get("decoded_stream_count"),
             }
             if surface_ok
@@ -560,7 +695,11 @@ def _enrich_features_from_pcap(
                 source=rel,
             ),
         )
-        _log(event_logger, "pcap_features_enrich_failed", {"reason_code": "tshark_execution_failed", "error_type": type(exc).__name__})
+        _log(
+            event_logger,
+            "pcap_features_enrich_failed",
+            {"reason_code": "tshark_execution_failed", "error_type": type(exc).__name__},
+        )
         return
     except (json.JSONDecodeError, ValueError) as exc:
         _apply_enrichment_outcome(
@@ -574,7 +713,11 @@ def _enrich_features_from_pcap(
                 source=rel,
             ),
         )
-        _log(event_logger, "pcap_features_enrich_failed", {"reason_code": "pcap_parser_failed", "error_type": type(exc).__name__})
+        _log(
+            event_logger,
+            "pcap_features_enrich_failed",
+            {"reason_code": "pcap_parser_failed", "error_type": type(exc).__name__},
+        )
         return
     except Exception as exc:  # noqa: BLE001
         _apply_enrichment_outcome(
@@ -588,7 +731,11 @@ def _enrich_features_from_pcap(
                 source=rel,
             ),
         )
-        _log(event_logger, "pcap_features_enrich_failed", {"reason_code": "pcap_enrichment_internal_error", "error_type": type(exc).__name__})
+        _log(
+            event_logger,
+            "pcap_features_enrich_failed",
+            {"reason_code": "pcap_enrichment_internal_error", "error_type": type(exc).__name__},
+        )
         return
     if not isinstance(stats, dict):
         _apply_enrichment_outcome(
@@ -680,12 +827,22 @@ def _enrich_features_from_pcap(
                 source=rel,
             ),
         )
-        _log(event_logger, "pcap_features_enrich_failed", {"reason_code": "pcap_enrichment_internal_error", "error_type": type(exc).__name__})
+        _log(
+            event_logger,
+            "pcap_features_enrich_failed",
+            {"reason_code": "pcap_enrichment_internal_error", "error_type": type(exc).__name__},
+        )
         return
 
     status = COMPLETED if observation_count > 0 else COMPLETED_NO_OBSERVATIONS
-    reason_code = "pcap_enrichment_completed" if observation_count > 0 else "pcap_enrichment_no_observations"
-    message = "PCAP enrichment completed." if observation_count > 0 else "PCAP enrichment completed with no packet observations."
+    reason_code = (
+        "pcap_enrichment_completed" if observation_count > 0 else "pcap_enrichment_no_observations"
+    )
+    message = (
+        "PCAP enrichment completed."
+        if observation_count > 0
+        else "PCAP enrichment completed with no packet observations."
+    )
     _apply_enrichment_outcome(
         enrich,
         make_outcome(
@@ -699,6 +856,7 @@ def _enrich_features_from_pcap(
         ),
     )
 
+
 def _refresh_traffic_posture(features: dict[str, Any]) -> None:
     posture = features.get("traffic_posture")
     if not isinstance(posture, dict):
@@ -710,18 +868,26 @@ def _refresh_traffic_posture(features: dict[str, Any]) -> None:
     flows = features.get("flows") if isinstance(features.get("flows"), dict) else {}
     bursts = features.get("bursts") if isinstance(features.get("bursts"), dict) else {}
     visibility = features.get("visibility") if isinstance(features.get("visibility"), dict) else {}
-    startup = features.get("startup_profile") if isinstance(features.get("startup_profile"), dict) else {}
+    startup = (
+        features.get("startup_profile") if isinstance(features.get("startup_profile"), dict) else {}
+    )
 
     summary = summarize_traffic_posture(
         metrics=metrics,
-        direction_summary=direction.get("summary") if isinstance(direction.get("summary"), dict) else {},
+        direction_summary=direction.get("summary")
+        if isinstance(direction.get("summary"), dict)
+        else {},
         flow_summary=flows.get("summary") if isinstance(flows.get("summary"), dict) else {},
         burst_summary=bursts.get("summary") if isinstance(bursts.get("summary"), dict) else {},
-        visibility_summary=visibility.get("summary") if isinstance(visibility.get("summary"), dict) else {},
+        visibility_summary=visibility.get("summary")
+        if isinstance(visibility.get("summary"), dict)
+        else {},
         startup_summary=startup.get("summary") if isinstance(startup.get("summary"), dict) else {},
     )
     posture["summary"] = summary
-    posture["status"] = "ok" if any(value is not None for value in summary.values()) else "not_attempted"
+    posture["status"] = (
+        "ok" if any(value is not None for value in summary.values()) else "not_attempted"
+    )
 
 
 def _concentration(items: list[dict[str, Any]], total: int, top_n: int) -> float | None:

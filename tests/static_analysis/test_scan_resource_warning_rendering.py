@@ -49,7 +49,9 @@ def test_minor_complex_entry_warning_renders_as_info_note(capsys) -> None:
 
 
 def test_large_bounds_warning_stays_warn(capsys) -> None:
-    report = _report_with_bounds_warning("We are out of bound with this complex entry. Count: 65536")
+    report = _report_with_bounds_warning(
+        "We are out of bound with this complex entry. Count: 65536"
+    )
     report.metadata["parse_error_resources"] = True
     report.metadata["string_index_resource_strings"] = 0
 
@@ -67,7 +69,9 @@ def test_large_bounds_warning_stays_warn(capsys) -> None:
 
 def test_fallback_recovered_bounds_warning_is_audit_only() -> None:
     warnings: list[str] = []
-    report = _report_with_bounds_warning("We are out of bound with this complex entry. Count: 65536")
+    report = _report_with_bounds_warning(
+        "We are out of bound with this complex entry. Count: 65536"
+    )
     report.metadata.update(
         {
             "parser_provenance": {
@@ -83,8 +87,4 @@ def test_fallback_recovered_bounds_warning_is_audit_only() -> None:
     lines = _append_resource_warning(warnings, report, "com.example.app", "artifact.apk")
 
     assert lines == []
-    assert warnings == [
-        "Resource table parser emitted bounds warnings "
-        "(package=com.example.app, artifact=artifact.apk counts=[65536]). "
-        "String/resource results were recovered with fallback parsing; re-run only if manual resource review needs confirmation."
-    ]
+    assert warnings == []

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from scytaledroid.Database.db_core.db_engine import TransientDbError
 from scytaledroid.Database.db_core.db_queries import run_sql
 
 _TABLE_EXISTS_SQL = """
@@ -31,6 +32,8 @@ def table_exists(
             context=context,
         )
         return bool(row and int(row[0] or 0) > 0)
+    except TransientDbError:
+        raise
     except Exception:
         return False
 

@@ -14,6 +14,7 @@ from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle, ObserverResult
 from scytaledroid.DynamicAnalysis.pcap.naming import make_pcap_capture_name, package_slug
+from scytaledroid.DynamicAnalysis.utils.path_utils import artifact_relative_path
 from scytaledroid.DynamicAnalysis.utils.pcap_minima import effective_min_pcap_bytes_for_run_profile
 
 PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
@@ -270,7 +271,7 @@ class PcapdroidCaptureObserver(Observer):
                 digest = _sha256_stream(local_path)
                 artifacts.append(
                     ArtifactRecord(
-                        relative_path=str(local_path.relative_to(run_ctx.run_dir)),
+                        relative_path=artifact_relative_path(run_ctx.run_dir, local_path),
                         type="pcapdroid_capture",
                         sha256=digest,
                         size_bytes=file_size,
@@ -356,7 +357,7 @@ class PcapdroidCaptureObserver(Observer):
         if meta_path.exists():
             artifacts.append(
                 ArtifactRecord(
-                    relative_path=str(meta_path.relative_to(run_ctx.run_dir)),
+                    relative_path=artifact_relative_path(run_ctx.run_dir, meta_path),
                     type="pcapdroid_capture_meta",
                     sha256=None,
                     size_bytes=meta_path.stat().st_size,
@@ -371,7 +372,7 @@ class PcapdroidCaptureObserver(Observer):
             error_path.write_text(error or "", encoding="utf-8")
             artifacts.append(
                 ArtifactRecord(
-                    relative_path=str(error_path.relative_to(run_ctx.run_dir)),
+                    relative_path=artifact_relative_path(run_ctx.run_dir, error_path),
                     type="observer_error",
                     sha256=None,
                     size_bytes=error_path.stat().st_size,
@@ -385,7 +386,7 @@ class PcapdroidCaptureObserver(Observer):
             error_path.write_text(error or "", encoding="utf-8")
             artifacts.append(
                 ArtifactRecord(
-                    relative_path=str(error_path.relative_to(run_ctx.run_dir)),
+                    relative_path=artifact_relative_path(run_ctx.run_dir, error_path),
                     type="observer_error",
                     sha256=None,
                     size_bytes=error_path.stat().st_size,
@@ -520,13 +521,21 @@ def _capture_failure_diagnostics(
         diagnostics["latest_fallback_size_bytes"] = _device_file_size(device_serial, fallback_path)
     if recheck_delay_s > 0:
         time.sleep(recheck_delay_s)
-        diagnostics["delayed_expected_device_path_exists"] = _device_file_exists(device_serial, device_path)
-        diagnostics["delayed_expected_device_path_size_bytes"] = _device_file_size(device_serial, device_path)
+        diagnostics["delayed_expected_device_path_exists"] = _device_file_exists(
+            device_serial, device_path
+        )
+        diagnostics["delayed_expected_device_path_size_bytes"] = _device_file_size(
+            device_serial, device_path
+        )
         delayed_fallback_path = _latest_pcapdroid_capture(device_serial, min_epoch=min_epoch)
         diagnostics["delayed_latest_fallback_path"] = delayed_fallback_path
         if delayed_fallback_path:
-            diagnostics["delayed_latest_fallback_exists"] = _device_file_exists(device_serial, delayed_fallback_path)
-            diagnostics["delayed_latest_fallback_size_bytes"] = _device_file_size(device_serial, delayed_fallback_path)
+            diagnostics["delayed_latest_fallback_exists"] = _device_file_exists(
+                device_serial, delayed_fallback_path
+            )
+            diagnostics["delayed_latest_fallback_size_bytes"] = _device_file_size(
+                device_serial, delayed_fallback_path
+            )
     return diagnostics
 
 
@@ -559,7 +568,9 @@ def _latest_pcapdroid_capture(device_serial: str, *, min_epoch: float | None = N
     return output
 
 
-def _peek_latest_pcapdroid(device_serial: str, *, min_epoch: float | None = None) -> dict[str, object]:
+def _peek_latest_pcapdroid(
+    device_serial: str, *, min_epoch: float | None = None
+) -> dict[str, object]:
     path = _latest_pcapdroid_capture(device_serial, min_epoch=min_epoch)
     if not path:
         return {"latest_path": None, "latest_mtime": None}

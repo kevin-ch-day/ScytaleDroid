@@ -111,6 +111,8 @@ def run_package_selection_menu(
     evidence_summary = prepared.evidence_summary
 
     while True:
+        row_models = list(prepared.row_models or [])
+        next_row = _next_recommended_row(row_models)
         if prepared.dataset_apps_total > 0:
             evidence_summary = evidence_summary or summarize_evidence_quota_fn(
                 prepared.dataset_pkgs, prepared.cfg
@@ -127,36 +129,52 @@ def run_package_selection_menu(
                 else False
             )
             remaining = max(0, int(prepared.expected_runs) - int(quota))
-            row_models = list(prepared.row_models or [])
             extra_runs = (
                 int(evidence_summary.get("extra_eligible_runs", 0)) if evidence_summary else 0
             )
-            next_row = _next_recommended_row(row_models)
-            _render_queue_summary_block(
-                prepared=prepared,
-                quota=quota,
-                apps_ok=apps_ok,
-                remaining=remaining,
-                extra_runs=extra_runs,
-                freeze_ok=freeze_ok,
-                next_row=next_row,
-                capture_device_selected=bool(getattr(prepared, "capture_device_selected", True)),
+            from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
+                active_research_cohort_label,
             )
 
+            print(f"\n{active_research_cohort_label()}")
+            build_scope = (
+                "current-build"
+                if getattr(prepared, "capture_device_selected", True)
+                else "tracked-build"
+            )
+            print(
+                f"{prepared.current_build_ready_count}/{prepared.dataset_apps_total} {build_scope} apps complete | {quota}/{prepared.expected_runs} target captures"
+            )
+            if next_row is not None:
+                reason = str(getattr(next_row, "next_label", "") or "review next capture")
+                print(
+                    f"Recommended next: {next_row.display_name} ({next_row.package_name}) — {reason}"
+                )
+                print(
+                    f"  Missing: {next_row.need_baseline} baseline, {next_row.need_interactive} interactive"
+                )
+            else:
+                print("No next capture recommended; use Summary to review collection state.")
+            if not getattr(prepared, "capture_device_selected", True):
+                print("Select a device before capture; these are tracked-build records.")
+        print("R) Run recommended  A) Select another app  S) Summary  B) Back")
+        choice = prompt_utils.prompt_text("Choose action / app name", required=False).strip()
+        if choice.lower() in {"r", "recommended"}:
+            if next_row is not None:
+                return next_row.package_name
+            print("No next capture is recommended. Select another app or review Summary.")
+            continue
+        if choice.lower() in {"a", "another"}:
             _render_compact_queue_table(
                 row_models,
                 baseline_required=int(getattr(prepared.cfg, "baseline_required", 3)),
                 interactive_required=int(getattr(prepared.cfg, "interactive_required", 4)),
                 next_row=next_row,
             )
-            warnings_line = _compact_warning_line(row_models)
-            notes_line = _compact_note_line(row_models)
-            _render_queue_footer_block(
-                warnings_line=warnings_line,
-                notes_line=notes_line,
-            )
-        choice = prompt_utils.prompt_text("Choose app # / name", required=False).strip()
-
+            index = choose_package_selection(prepared)
+            if index is not None:
+                return prepared.packages[index][0]
+            continue
         if not choice:
             index = choose_package_selection(prepared)
             if index is None:
@@ -165,6 +183,20 @@ def run_package_selection_menu(
             return package_name
         choice_lc = choice.lower()
         if choice_lc in {"s", "summary"}:
+            if prepared.dataset_apps_total > 0:
+                _render_queue_summary_block(
+                    prepared=prepared,
+                    quota=quota,
+                    apps_ok=apps_ok,
+                    remaining=remaining,
+                    extra_runs=extra_runs,
+                    freeze_ok=freeze_ok,
+                    next_row=next_row,
+                    capture_device_selected=bool(
+                        getattr(prepared, "capture_device_selected", True)
+                    ),
+                )
+            _render_queue_footer_block()
             _status_reports.render_cohort_status_details(
                 dataset_apps_total=prepared.dataset_apps_total,
                 dataset_apps_complete=prepared.dataset_apps_complete,
@@ -228,7 +260,7 @@ def run_package_selection_menu(
             return package_name
         print(
             status_messages.status(
-                "Invalid choice. Enter an app number/name or use P, S, V, Y, H, D, or B.",
+                "Invalid choice. Enter an app number/name or use R, A, S, V, P, Y, H, D, or B.",
                 level="warn",
             )
         )

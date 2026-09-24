@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
 
@@ -44,15 +45,27 @@ def summarize_dynamic_run_artifacts(
     pcap_report_path = run_dir / "analysis" / "pcap_report.json"
     pcap_features_path = run_dir / "analysis" / "pcap_features.json"
     overlap_path = run_dir / "analysis" / "static_dynamic_overlap.json"
-    db_persistence_path = run_dir / "analysis" / "index" / "v1" / "db_persistence_status.json"
+    db_persistence_path = (
+        EvidencePackWriter(run_dir).derived_writer().run_dir
+        / "analysis"
+        / "index"
+        / "v1"
+        / "db_persistence_status.json"
+    )
     manifest_path = run_dir / "run_manifest.json"
 
     manifest = _load_json(manifest_path)
     manifest_dataset_truth = _manifest_dataset_truth(manifest)
     latest_dataset_validity = _load_latest_event_details(events_path, event_type="dataset_validity")
-    latest_derived_indexing = _load_latest_event_details(events_path, event_type="dynamic_derived_indexing_complete")
-    current_derived_indexing = _load_current_db_index_counts(dynamic_run_id) if include_db_counts else None
-    current_dataset_truth = _load_current_db_dataset_truth(dynamic_run_id) if include_db_counts else None
+    latest_derived_indexing = _load_latest_event_details(
+        events_path, event_type="dynamic_derived_indexing_complete"
+    )
+    current_derived_indexing = (
+        _load_current_db_index_counts(dynamic_run_id) if include_db_counts else None
+    )
+    current_dataset_truth = (
+        _load_current_db_dataset_truth(dynamic_run_id) if include_db_counts else None
+    )
 
     return {
         "run_dir": str(run_dir),
@@ -97,19 +110,33 @@ def emit_dynamic_audit_report(
     print("Dynamic analysis — run audit")
     print("----------------------------")
     print(f"Run ID        : {dynamic_run_id}")
-    print(f"Run dir       : {summary['run_dir']} ({'present' if summary['run_dir_exists'] else 'missing'})")
+    print(
+        f"Run dir       : {summary['run_dir']} ({'present' if summary['run_dir_exists'] else 'missing'})"
+    )
     print(f"Dynamic log   : {summary['dynamic_text_log'] or '(not found)'}")
     print(f"Dynamic jsonl : {summary['dynamic_json_log'] or '(not found)'}")
-    print(f"Run events    : {summary['events_path']} ({'present' if summary['events_present'] else 'missing'})")
+    print(
+        f"Run events    : {summary['events_path']} ({'present' if summary['events_present'] else 'missing'})"
+    )
     print(f"Event count   : {summary['event_count']}")
-    print(f"Run monitor   : {summary['monitor_path']} ({'present' if summary['monitor_present'] else 'missing'})")
-    print(f"PCAP report   : {summary['pcap_report_path']} ({'present' if summary['pcap_report_present'] else 'missing'})")
-    print(f"PCAP features : {summary['pcap_features_path']} ({'present' if summary['pcap_features_present'] else 'missing'})")
-    print(f"Overlap JSON  : {summary['overlap_path']} ({'present' if summary['overlap_present'] else 'missing'})")
+    print(
+        f"Run monitor   : {summary['monitor_path']} ({'present' if summary['monitor_present'] else 'missing'})"
+    )
+    print(
+        f"PCAP report   : {summary['pcap_report_path']} ({'present' if summary['pcap_report_present'] else 'missing'})"
+    )
+    print(
+        f"PCAP features : {summary['pcap_features_path']} ({'present' if summary['pcap_features_present'] else 'missing'})"
+    )
+    print(
+        f"Overlap JSON  : {summary['overlap_path']} ({'present' if summary['overlap_present'] else 'missing'})"
+    )
 
     db_status = summary.get("db_persistence_status")
     if isinstance(db_status, dict):
-        label = "ok" if db_status.get("ok") is True else str(db_status.get("error_code") or "failed")
+        label = (
+            "ok" if db_status.get("ok") is True else str(db_status.get("error_code") or "failed")
+        )
         print(f"DB index      : {label}")
 
     dataset_validity = (

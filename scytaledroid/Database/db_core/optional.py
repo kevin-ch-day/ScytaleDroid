@@ -74,10 +74,17 @@ def maybe_get_database() -> DatabaseEngine | None:
 
         return DatabaseEngine()
     except Exception as exc:  # noqa: BLE001 - classify external DB boundary
+        errno = getattr(exc, "errno", None)
+        detail = type(exc).__name__
+        if errno is not None:
+            detail = f"{detail} errno={errno}"
+        text = str(exc).strip()
+        if text:
+            detail = f"{detail}: {text}"
         raise DatabaseUnavailableError(
             DatabaseAvailability(
                 state="connection_failed",
-                message=f"database connection failed: {type(exc).__name__}",
+                message=f"database connection failed: {detail}",
                 source=availability.source,
             )
         ) from exc

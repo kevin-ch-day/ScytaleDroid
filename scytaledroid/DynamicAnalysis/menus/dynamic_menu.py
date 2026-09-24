@@ -397,6 +397,23 @@ def _resolve_active_cohort_for_run() -> dict[str, object] | None:
 
 
 def _run_focused_app_run(ui_defaults: _DynamicUiDefaults) -> None:
+    from scytaledroid.DynamicAnalysis.controllers.capture_run import run_capture_app
+
+    def guided_collection():
+        if isinstance(_resolve_active_cohort_for_run(), dict):
+            _run_guided_dataset_run(ui_defaults)
+
+    run_capture_app(
+        select_observers=lambda serial, mode: _select_observers_impl(serial, mode=mode),
+        guided_collection=guided_collection,
+        advanced_capture=lambda: _run_advanced_app_run(ui_defaults),
+        research_qualification=_run_paper_freeze_readiness,
+        observer_prompts_enabled=bool(getattr(ui_defaults, "observer_prompts_enabled", False)),
+        pcapdroid_api_key=getattr(ui_defaults, "pcapdroid_api_key", None),
+    )
+
+
+def _run_advanced_app_run(ui_defaults: _DynamicUiDefaults) -> None:
     _run_target_adapter.run_focused_app_run(
         ui_defaults,
         run_sandbox_dynamic_run_fn=run_sandbox_dynamic_run,

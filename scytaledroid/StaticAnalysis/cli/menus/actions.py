@@ -27,6 +27,9 @@ from ..flows.profile_prior_session import (
     format_audit_session_command,
     format_grain_integrity_session_command,
 )
+from ..flows.session_stamp_resolution import (
+    _existing_db_session_labels as _load_existing_db_session_labels,
+)
 
 _LARGE_SPLIT_WARN_MIN_APK = 20
 _RUN_SETUP_LABEL_W = 18
@@ -34,36 +37,10 @@ _RUN_SETUP_LABEL_W = 18
 
 def _existing_db_session_labels(session_stamp: str) -> list[str]:
     if core_q is None:
-        raise RuntimeError("persistent session state cannot be inspected (database query helper unavailable)")
-    try:
-        rows = core_q.run_sql(
-            """
-            SELECT DISTINCT COALESCE(NULLIF(TRIM(session_label), ''), NULLIF(TRIM(session_stamp), ''))
-            FROM static_analysis_runs
-            WHERE session_label=%s OR session_label LIKE %s OR session_stamp=%s OR session_stamp LIKE %s
-            UNION
-            SELECT DISTINCT COALESCE(NULLIF(TRIM(session_label), ''), NULLIF(TRIM(session_stamp), ''))
-            FROM static_analysis_sessions
-            WHERE session_label=%s OR session_label LIKE %s OR session_stamp=%s OR session_stamp LIKE %s
-            """,
-            (session_stamp, f"{session_stamp}-%", session_stamp, f"{session_stamp}-%") * 2,
-            fetch="all",
-        ) or []
-    except Exception as exc:
         raise RuntimeError(
-            "persistent session state cannot be inspected; refusing normal static execution"
-        ) from exc
-
-    labels: list[str] = []
-    for row in rows:
-        value = None
-        if isinstance(row, (list, tuple)) and row:
-            value = row[0]
-        elif isinstance(row, dict) and row:
-            value = next(iter(row.values()))
-        if isinstance(value, str) and value.strip():
-            labels.append(value.strip())
-    return labels
+            "persistent session state cannot be inspected (database query helper unavailable)"
+        )
+    return _load_existing_db_session_labels(session_stamp, run_sql=core_q.run_sql)
 
 
 def _next_session_append_label(session_stamp: str) -> str:
@@ -102,7 +79,9 @@ def _effective_artifact_counts(groups: tuple[Any, ...], *, scan_splits: bool) ->
     for group in groups:
         artifacts = select_group_artifacts(group, scan_splits=scan_splits)
         total += len(artifacts)
-        split_total += sum(1 for artifact in artifacts if getattr(artifact, "is_split_member", False))
+        split_total += sum(
+            1 for artifact in artifacts if getattr(artifact, "is_split_member", False)
+        )
     return total, split_total
 
 
@@ -340,7 +319,11 @@ def render_artifact_purge_outcome(outcome: Any, *, session_label: str | None = N
             )
         )
     else:
-        print(status_messages.status(f"No prior local static artifacts found for {label}.", level="info"))
+        print(
+            status_messages.status(
+                f"No prior local static artifacts found for {label}.", level="info"
+            )
+        )
     if failed:
         failures = ", ".join(f"{path} ({reason})" for path, reason in failed)
         print(status_messages.status(f"Artifact cleanup failures: {failures}", level="error"))
@@ -349,12 +332,16 @@ def render_artifact_purge_outcome(outcome: Any, *, session_label: str | None = N
 def _lookup_existing_session_state(session_stamp: str) -> tuple[bool, int | None, int | None]:
     sessions_dir = Path(app_config.DATA_DIR) / "sessions"
     run_map_path = sessions_dir / session_stamp / "run_map.json"
-    archive_dir = Path(app_config.DATA_DIR) / "static_analysis" / "reports" / "archive" / session_stamp
+    archive_dir = (
+        Path(app_config.DATA_DIR) / "static_analysis" / "reports" / "archive" / session_stamp
+    )
     has_local_session = run_map_path.exists() or any(archive_dir.glob("*.json"))
     attempts = None
     canonical_id = None
     if core_q is None:
-        raise RuntimeError("persistent session state cannot be inspected (database query helper unavailable)")
+        raise RuntimeError(
+            "persistent session state cannot be inspected (database query helper unavailable)"
+        )
     try:
         row = core_q.run_sql(
             "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s OR session_stamp=%s",
@@ -412,7 +399,9 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
         return params
     has_db_attempts = isinstance(attempts, int) and attempts > 0
     if has_local_session or has_db_attempts:
-        print(status_messages.status(f"Session label already exists: {session_stamp}", level="warn"))
+        print(
+            status_messages.status(f"Session label already exists: {session_stamp}", level="warn")
+        )
         if attempts is not None:
             summary = f"App rows: {attempts}"
             if canonical_id:
@@ -514,7 +503,9 @@ def prompt_run_setup(
     _run_setup_kv("Audit", format_audit_session_command(session_stamp))
     _run_setup_kv(
         "Grain triage",
-        format_grain_integrity_session_command(session_stamp, count_archive=True, aggregate_json=False),
+        format_grain_integrity_session_command(
+            session_stamp, count_archive=True, aggregate_json=False
+        ),
     )
     print()
     if has_existing:
@@ -526,7 +517,12 @@ def prompt_run_setup(
         if choice == "0":
             return "cancel", effective, None
         if choice == "2":
-            print(status_messages.status("Use the Audit and Grain triage commands above to review this session.", level="info"))
+            print(
+                status_messages.status(
+                    "Use the Audit and Grain triage commands above to review this session.",
+                    level="info",
+                )
+            )
             return "cancel", effective, None
         appended = _append_session_label(session_stamp, attempts)
         print(status_messages.status(f"Session label: {appended}", level="info"))

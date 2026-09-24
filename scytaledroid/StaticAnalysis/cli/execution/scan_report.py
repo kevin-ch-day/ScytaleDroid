@@ -74,10 +74,16 @@ def _append_resource_warning(
     resource_string_count = metadata.get("string_index_resource_strings")
     parse_error_resources = bool(metadata.get("parse_error_resources"))
     resource_fallback_used = bool(metadata.get("resource_fallback_used"))
-    resource_parse_partial = bool(metadata.get("resource_parse_partial") or parser_map.get("resource_parse_partial"))
-    resource_parse_state = str(metadata.get("resource_parse_state") or parser_map.get("resource_parse_state") or "")
+    resource_parse_partial = bool(
+        metadata.get("resource_parse_partial") or parser_map.get("resource_parse_partial")
+    )
+    resource_parse_state = str(
+        metadata.get("resource_parse_state") or parser_map.get("resource_parse_state") or ""
+    )
     resource_string_fallback_count = int(
-        metadata.get("resource_string_fallback_count") or parser_map.get("resource_string_fallback_count") or 0
+        metadata.get("resource_string_fallback_count")
+        or parser_map.get("resource_string_fallback_count")
+        or 0
     )
     if level == "info":
         warnings.append(
@@ -86,14 +92,13 @@ def _append_resource_warning(
             "String/resource coverage may be slightly incomplete; a re-run is usually unnecessary."
         )
         headline = "Resource table parser note (minor complex-entry warning)."
-        guidance = (
-            "String/resource coverage may be slightly incomplete; re-run only if this APK needs deep string/resource review."
-        )
+        guidance = "String/resource coverage may be slightly incomplete; re-run only if this APK needs deep string/resource review."
     else:
         recovered = resource_string_fallback_count > 0
-        likely_partial = (
-            not recovered
-            and (parse_error_resources or not resource_fallback_used or resource_string_count in (None, 0))
+        likely_partial = not recovered and (
+            parse_error_resources
+            or not resource_fallback_used
+            or resource_string_count in (None, 0)
         )
         if likely_partial:
             warnings.append(
@@ -102,23 +107,21 @@ def _append_resource_warning(
                 "String/resource results may be materially incomplete; re-run this APK if deep resource review matters."
             )
             headline = "Resource table parse appears partial (string/resource parsing)."
-            guidance = (
-                "String/resource results may be materially incomplete; re-run this APK if deep resource/resource-string review matters."
-            )
+            guidance = "String/resource results may be materially incomplete; re-run this APK if deep resource/resource-string review matters."
         else:
+            recovered_quietly = resource_parse_state == "fallback_recovered" or (
+                resource_string_fallback_count > 0 and not resource_parse_partial
+            )
+            if recovered_quietly:
+                # Parser notes stay on report metadata; do not reprint at session-end WARN.
+                return []
             warnings.append(
                 "Resource table parser emitted bounds warnings "
                 f"(package={package_name}, artifact={artifact_label}{count_hint}). "
                 "String/resource results were recovered with fallback parsing; re-run only if manual resource review needs confirmation."
             )
-            if resource_parse_state == "fallback_recovered" or (
-                resource_string_fallback_count > 0 and not resource_parse_partial
-            ):
-                return []
             headline = "Resource table bounds warning with fallback recovery."
-            guidance = (
-                "String/resource results include fallback-recovered resource strings; re-run only if manual resource review needs confirmation."
-            )
+            guidance = "String/resource results include fallback-recovered resource strings; re-run only if manual resource review needs confirmation."
 
     inline_lines: list[ResourceWarningLine] = [
         (level, headline),
@@ -132,10 +135,17 @@ def _append_resource_warning(
     inline_lines.append((level, f"Artifact: {artifact_label}"))
 
     if counts:
-        inline_lines.append((level, f"Count values: {', '.join(str(val) for val in sorted(set(counts)))}"))
+        inline_lines.append(
+            (level, f"Count values: {', '.join(str(val) for val in sorted(set(counts)))}")
+        )
 
     inline_lines.append((level, guidance))
-    inline_lines.append((level, "Detector coverage warning only; APK analysis execution is still OK unless execution errors are reported."))
+    inline_lines.append(
+        (
+            level,
+            "Detector coverage warning only; APK analysis execution is still OK unless execution errors are reported.",
+        )
+    )
 
     return inline_lines
 
@@ -213,7 +223,11 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
         if report is None:
             continue
         metadata = report.metadata if isinstance(getattr(report, "metadata", None), Mapping) else {}
-        summary = metadata.get("pipeline_summary") if isinstance(metadata.get("pipeline_summary"), Mapping) else None
+        summary = (
+            metadata.get("pipeline_summary")
+            if isinstance(metadata.get("pipeline_summary"), Mapping)
+            else None
+        )
 
         if isinstance(summary, Mapping):
             detector_total += int(summary.get("detector_total", 0) or 0)
@@ -260,7 +274,9 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
 
             skips = summary.get("skipped_detectors")
             if isinstance(skips, list):
-                skipped_detector_rows_collect.extend(row for row in skips if isinstance(row, Mapping))
+                skipped_detector_rows_collect.extend(
+                    row for row in skips if isinstance(row, Mapping)
+                )
             placeholders = summary.get("placeholder_detectors")
             if isinstance(placeholders, list):
                 placeholder_detector_rows_collect.extend(
@@ -282,8 +298,14 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
             report = artifact.load_report()
             if report is None:
                 continue
-            metadata = report.metadata if isinstance(getattr(report, "metadata", None), Mapping) else {}
-            summary = metadata.get("pipeline_summary") if isinstance(metadata.get("pipeline_summary"), Mapping) else None
+            metadata = (
+                report.metadata if isinstance(getattr(report, "metadata", None), Mapping) else {}
+            )
+            summary = (
+                metadata.get("pipeline_summary")
+                if isinstance(metadata.get("pipeline_summary"), Mapping)
+                else None
+            )
             if not isinstance(summary, Mapping):
                 continue
             for key, value in (summary.get("status_counts") or {}).items():
@@ -299,12 +321,8 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
     finding_fail_count = len(finding_fail_detectors)
 
     skipped_detectors_merged = merge_skipped_detectors(skipped_detector_rows_collect)
-    placeholder_detectors_merged = merge_skipped_detectors(
-        placeholder_detector_rows_collect
-    )
-    implemented_stage_opportunities = max(
-        0, detector_total - placeholder_stage_opportunities
-    )
+    placeholder_detectors_merged = merge_skipped_detectors(placeholder_detector_rows_collect)
+    implemented_stage_opportunities = max(0, detector_total - placeholder_stage_opportunities)
     executed_implemented_stage_opportunities = min(
         detector_executed, implemented_stage_opportunities
     )
@@ -366,8 +384,7 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
         "executed_implemented_stage_opportunities": executed_implemented_stage_opportunities,
         "implemented_stage_execution_rate": (
             round(
-                executed_implemented_stage_opportunities
-                / implemented_stage_opportunities,
+                executed_implemented_stage_opportunities / implemented_stage_opportunities,
                 6,
             )
             if implemented_stage_opportunities
@@ -420,7 +437,11 @@ def _execute_single_artifact(
     if error:
         return None, None, tuple(), error, False
 
-    duration = report.metadata.get("duration_seconds", 0.0) if isinstance(report.metadata, Mapping) else 0.0
+    duration = (
+        report.metadata.get("duration_seconds", 0.0)
+        if isinstance(report.metadata, Mapping)
+        else 0.0
+    )
 
     timings = tuple(
         (result.detector_id or "detector", float(getattr(result, "duration_sec", 0.0) or 0.0))
@@ -492,11 +513,7 @@ def build_scan_report_metadata_payload(
 
     if extra_metadata:
         metadata_payload.update(
-            {
-                key: value
-                for key, value in extra_metadata.items()
-                if value is not None
-            }
+            {key: value for key, value in extra_metadata.items() if value is not None}
         )
 
     return metadata_payload
@@ -627,9 +644,9 @@ def generate_report(
             stage_observer=stage_observer,
         )
         if phase_timing_sink is not None:
-            phase_timing_sink["analyze_apk_wall_s"] = phase_timing_sink.get("analyze_apk_wall_s", 0.0) + (
-                time.monotonic() - t0
-            )
+            phase_timing_sink["analyze_apk_wall_s"] = phase_timing_sink.get(
+                "analyze_apk_wall_s", 0.0
+            ) + (time.monotonic() - t0)
 
     except StaticAnalysisError as exc:
         try:

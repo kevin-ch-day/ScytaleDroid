@@ -4,7 +4,9 @@ import pytest
 from scytaledroid.Database.db_core import optional
 
 
-def test_maybe_get_database_returns_none_when_database_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_maybe_get_database_returns_none_when_database_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(optional.db_config, "DB_CONFIG", {"engine": "disabled", "database": ""})
     monkeypatch.setattr(optional.db_config, "DB_CONFIG_SOURCE", "disabled")
 
@@ -14,7 +16,9 @@ def test_maybe_get_database_returns_none_when_database_disabled(monkeypatch: pyt
     assert "database disabled" in availability.message
 
 
-def test_require_database_fails_explicitly_when_database_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_require_database_fails_explicitly_when_database_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(optional.db_config, "DB_CONFIG", {"engine": "disabled", "database": ""})
     monkeypatch.setattr(optional.db_config, "DB_CONFIG_SOURCE", "disabled")
 
@@ -29,11 +33,11 @@ def test_maybe_get_database_classifies_connection_failure(monkeypatch: pytest.Mo
     monkeypatch.setattr(optional.db_config, "DB_CONFIG", {"engine": "mysql", "database": "scytale"})
     monkeypatch.setattr(optional.db_config, "DB_CONFIG_SOURCE", "env:SCYTALEDROID_DB_URL")
 
+    import scytaledroid.Database.db_core.db_engine as db_engine
+
     class BrokenDatabaseEngine:
         def __init__(self) -> None:
-            raise RuntimeError("network down")
-
-    import scytaledroid.Database.db_core.db_engine as db_engine
+            raise db_engine.DatabaseError("Access denied", errno=1045, sqlstate="28000")
 
     monkeypatch.setattr(db_engine, "DatabaseEngine", BrokenDatabaseEngine)
 
@@ -41,10 +45,14 @@ def test_maybe_get_database_classifies_connection_failure(monkeypatch: pytest.Mo
         optional.maybe_get_database()
 
     assert excinfo.value.availability.state == "connection_failed"
-    assert "database connection failed" in str(excinfo.value)
+    assert "database connection failed: DatabaseError errno=1045: Access denied" in str(
+        excinfo.value
+    )
 
 
-def test_optional_database_boundary_does_not_mask_required_database(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_optional_database_boundary_does_not_mask_required_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(optional.db_config, "DB_CONFIG", {"engine": "disabled", "database": ""})
 
     with pytest.raises(optional.DatabaseUnavailableError):

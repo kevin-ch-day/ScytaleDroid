@@ -61,6 +61,7 @@ class DynamicSessionResult:
     telemetry_process: list[dict[str, object]] = field(default_factory=list)
     telemetry_network: list[dict[str, object]] = field(default_factory=list)
     telemetry_stats: dict[str, object] = field(default_factory=dict)
+    startup_failure: dict[str, object] = field(default_factory=dict)
 
     @property
     def elapsed_seconds(self) -> int | None:

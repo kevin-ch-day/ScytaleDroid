@@ -174,6 +174,7 @@ def _evidence_alignment_tone(
 # Compact header
 # -------------------------
 
+
 def _compact_header(
     *,
     refreshed: str,
@@ -205,6 +206,7 @@ def _compact_header(
     joined = "   ".join(parts)
     # Clamp to width without breaking ANSI sequences
     return text_blocks.truncate_visible(joined, term_width)
+
 
 def _format_metric_line(label: str, value: str, *, width: int = 16) -> str:
     palette = colors.get_palette()
@@ -245,7 +247,7 @@ def _last_seen_brief(
 
 
 def _device_table_rows(
-    summaries: list[dict[str, str | None]]
+    summaries: list[dict[str, str | None]],
 ) -> list[tuple[str, str, str, str, str, str]]:
     rows: list[tuple[str, str, str, str, str, str]] = []
     for summary in summaries:
@@ -310,15 +312,13 @@ def _build_delta_items(delta: object, *, limit: int = 5) -> list[str]:
     added_names = [name for name in added_list if isinstance(name, str) and name]
     if added_names:
         messages.append(
-            colors.apply("Added: ", palette.success, bold=True)
-            + _join_names(added_names)
+            colors.apply("Added: ", palette.success, bold=True) + _join_names(added_names)
         )
 
     removed_names = [name for name in removed_list if isinstance(name, str) and name]
     if removed_names:
         messages.append(
-            colors.apply("Removed: ", palette.error, bold=True)
-            + _join_names(removed_names)
+            colors.apply("Removed: ", palette.error, bold=True) + _join_names(removed_names)
         )
 
     if updated_list:
@@ -339,8 +339,7 @@ def _build_delta_items(delta: object, *, limit: int = 5) -> list[str]:
             if len(updated_list) > limit:
                 formatted_updates.append("…")
             messages.append(
-                colors.apply("Updated: ", palette.warning, bold=True)
-                + ", ".join(formatted_updates)
+                colors.apply("Updated: ", palette.warning, bold=True) + ", ".join(formatted_updates)
             )
 
     return messages
@@ -409,9 +408,13 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
             capture_status = str(status_block.get("capture_status") or "").strip().lower()
             research_status = str(status_block.get("research_status") or "").strip().lower()
             if capture_status and not reason:
-                capture_status_counts[capture_status] = capture_status_counts.get(capture_status, 0) + 1
+                capture_status_counts[capture_status] = (
+                    capture_status_counts.get(capture_status, 0) + 1
+                )
             if research_status:
-                research_status_counts[research_status] = research_status_counts.get(research_status, 0) + 1
+                research_status_counts[research_status] = (
+                    research_status_counts.get(research_status, 0) + 1
+                )
     receipt_key = ""
     try:
         latest_payload = json.loads(latest_manifest.read_text(encoding="utf-8"))
@@ -446,7 +449,9 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
         "session_state": session_state,
         "session_note": session_note,
         "artifacts_root": artifact_store.repo_relative_path(session_dir),
-        "receipts_root": artifact_store.repo_relative_path(receipts_root) if receipts_root.exists() else None,
+        "receipts_root": artifact_store.repo_relative_path(receipts_root)
+        if receipts_root.exists()
+        else None,
     }
 
 
@@ -476,7 +481,11 @@ def _compute_pipeline_state(serial: str | None) -> dict[str, object]:
             plan = harvest.build_harvest_plan(rows, include_system_partitions=False)
             scheduled = sum(1 for pkg in plan.packages if not pkg.skip_reason)
             blocked_policy = sum(1 for pkg in plan.packages if pkg.skip_reason == "policy_non_root")
-            blocked_scope = sum(1 for pkg in plan.packages if pkg.skip_reason and pkg.skip_reason != "policy_non_root")
+            blocked_scope = sum(
+                1
+                for pkg in plan.packages
+                if pkg.skip_reason and pkg.skip_reason != "policy_non_root"
+            )
             state.update(
                 {
                     "inventory_snapshot_id": snapshot_id if isinstance(snapshot_id, int) else None,
@@ -542,8 +551,7 @@ def _render_inventory_status(metadata: object) -> None:
     status_chip = _status_badge("STALE" if stale else "FRESH", "warning" if stale else "success")
     lines: list[str] = []
     lines.append(
-        f"{status_chip} Last run: {timestamp_display}"
-        + (f" ({age_text} ago)" if age_text else "")
+        f"{status_chip} Last run: {timestamp_display}" + (f" ({age_text} ago)" if age_text else "")
     )
     if count_text:
         lines.append(colors.apply(f"Packages: {count_text}", palette.text, bold=True))
@@ -619,19 +627,24 @@ def _evidence_alignment_text(
     session_note = str(latest_harvest.get("session_note") or "").strip()
     harvest_snapshot_id = latest_harvest.get("snapshot_id")
     if harvest_snapshot_id is None:
-        return "snapshot ?"
+        return "harvest snapshot ?"
     if session_state in {"drifted", "partial", "failed", "ineligible"}:
         suffix = f" ({session_note})" if session_note else ""
         if inventory_snapshot_id is not None and harvest_snapshot_id == inventory_snapshot_id:
-            return f"aligned to {harvest_snapshot_id} but latest harvest needs review{suffix}"
+            return (
+                f"aligned to snapshot {harvest_snapshot_id} but latest harvest needs review{suffix}"
+            )
         if inventory_snapshot_id is not None:
-            return f"harvest {harvest_snapshot_id} vs inventory {inventory_snapshot_id}; latest harvest needs review{suffix}"
-        return f"harvest @ {harvest_snapshot_id}; latest harvest needs review{suffix}"
+            return (
+                f"harvest snapshot {harvest_snapshot_id} vs inventory {inventory_snapshot_id}; "
+                f"latest harvest needs review{suffix}"
+            )
+        return f"harvest snapshot {harvest_snapshot_id}; latest harvest needs review{suffix}"
     if inventory_snapshot_id is not None and harvest_snapshot_id == inventory_snapshot_id:
-        return f"aligned to {harvest_snapshot_id}"
+        return f"aligned to snapshot {harvest_snapshot_id}"
     if inventory_snapshot_id is not None:
-        return f"harvest {harvest_snapshot_id} vs inventory {inventory_snapshot_id}"
-    return f"harvest @ {harvest_snapshot_id}"
+        return f"harvest snapshot {harvest_snapshot_id} vs inventory {inventory_snapshot_id}"
+    return f"harvest snapshot {harvest_snapshot_id}"
 
 
 def _summary_next_step(
@@ -651,7 +664,11 @@ def _summary_next_step(
     session_state = str((latest_harvest or {}).get("session_state") or "").strip().lower()
     if session_state in {"drifted", "partial", "failed", "ineligible"}:
         return "Next: review latest harvest drift/issues, then refresh inventory or re-harvest as needed."
-    if harvest_snapshot_id is not None and inventory_snapshot_id is not None and harvest_snapshot_id != inventory_snapshot_id:
+    if (
+        harvest_snapshot_id is not None
+        and inventory_snapshot_id is not None
+        and harvest_snapshot_id != inventory_snapshot_id
+    ):
         return "Next: run harvest (2) to match latest inventory."
     return "Next: static analysis (menu 2) or re-harvest as needed."
 
@@ -662,7 +679,9 @@ def _render_compact_status(
     pipeline: dict[str, object],
 ) -> None:
     status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
-    age_display = _compact_age_display(getattr(inventory_metadata, "age_display", None) or "unknown")
+    age_display = _compact_age_display(
+        getattr(inventory_metadata, "age_display", None) or "unknown"
+    )
     pkg_count = getattr(inventory_metadata, "package_count", None)
     inventory_mode = inventory_mode_label(getattr(inventory_metadata, "collection_mode", None))
     harvested_count = pipeline.get("harvested")
@@ -670,7 +689,9 @@ def _render_compact_status(
     blocked_scope = pipeline.get("blocked_scope")
     latest_harvest = pipeline.get("latest_harvest") if isinstance(pipeline, dict) else None
     inventory_snapshot_id = pipeline.get("inventory_snapshot_id")
-    harvest_snapshot_id = latest_harvest.get("snapshot_id") if isinstance(latest_harvest, dict) else None
+    harvest_snapshot_id = (
+        latest_harvest.get("snapshot_id") if isinstance(latest_harvest, dict) else None
+    )
     evidence_alignment = _evidence_alignment_text(
         latest_harvest=latest_harvest,
         inventory_snapshot_id=inventory_snapshot_id,
@@ -681,7 +702,6 @@ def _render_compact_status(
     )
     ev_styled = colors.apply(evidence_alignment, colors.style(ev_tone), bold=True)
     palette = colors.get_palette()
-    pipe = colors.apply(" │ ", palette.muted)
 
     inv_bits = [f"{_inventory_status_text(status_label)}"]
     if inventory_mode:
@@ -703,21 +723,18 @@ def _render_compact_status(
     pullable_txt = _format_summary_value(pipeline.get("policy_eligible"))
     pol_txt = _format_summary_value(blocked_policy)
     sc_txt = _format_summary_value(blocked_scope)
+    muted = palette.muted
     har_part = (
         f"{harvest_styled} · "
-        f"{colors.apply('pullable', palette.muted)} {pullable_txt} · "
-        f"{colors.apply('policy-blocked', palette.muted)} {pol_txt} · "
-        f"{colors.apply('scope-blocked', palette.muted)} {sc_txt}"
+        f"{pullable_txt} {colors.apply('pullable', muted)} · "
+        f"{pol_txt} {colors.apply('policy-blocked', muted)} · "
+        f"{sc_txt} {colors.apply('scope-blocked', muted)}"
     )
 
     print()
-    print(
-        f"{colors.apply('Inv', palette.muted, bold=True)} {inv_part}"
-        f"{pipe}"
-        f"{colors.apply('Har', palette.muted, bold=True)} {har_part}"
-        f"{pipe}"
-        f"{colors.apply('Ev', palette.muted, bold=True)} {ev_styled}"
-    )
+    print(_format_metric_line("Inv", inv_part, width=4))
+    print(_format_metric_line("Har", har_part, width=4))
+    print(_format_metric_line("Ev", ev_styled, width=4))
     print(
         status_messages.highlight(
             _summary_next_step(
@@ -754,19 +771,27 @@ def print_device_details(
     print()
     print(colors.apply("Device Capability", colors.style("header"), bold=True))
     print(text_blocks.divider(width=17, style="divider"))
-    print(f"{'Wi-Fi':<12} : {colors.apply(format_wifi_state(active_details.get('wifi_state')), colors.style('info'), bold=True)}")
-    print(f"{'Battery':<12} : {colors.apply(format_battery(active_details), colors.style('accent'), bold=True)}")
+    print(
+        f"{'Wi-Fi':<12} : {colors.apply(format_wifi_state(active_details.get('wifi_state')), colors.style('info'), bold=True)}"
+    )
+    print(
+        f"{'Battery':<12} : {colors.apply(format_battery(active_details), colors.style('accent'), bold=True)}"
+    )
     print(f"{'Root access':<12} : {_root_badge(active_details.get('is_rooted'))}")
 
     if not inventory_metadata:
         return
 
     status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
-    age_display = _compact_age_display(getattr(inventory_metadata, "age_display", None) or "unknown")
+    age_display = _compact_age_display(
+        getattr(inventory_metadata, "age_display", None) or "unknown"
+    )
     pkg_count = getattr(inventory_metadata, "package_count", None)
     inventory_mode = inventory_mode_label(getattr(inventory_metadata, "collection_mode", None))
     identity_source = str(getattr(inventory_metadata, "identity_source", "") or "").strip()
-    identity_quality = _identity_quality_label(getattr(inventory_metadata, "identity_quality", None))
+    identity_quality = _identity_quality_label(
+        getattr(inventory_metadata, "identity_quality", None)
+    )
     path_enriched = getattr(inventory_metadata, "path_enriched_packages", None)
     bulk_only = getattr(inventory_metadata, "bulk_identity_only_packages", None)
     current_state_unavailable_reason = str(
@@ -799,10 +824,7 @@ def print_device_details(
         f"{_styled_count_phrase(pipeline.get('blocked_scope'), 'scope', tone='warning')}"
     )
     if inventory_mode:
-        print(
-            f"{'Mode':<12} : "
-            f"{colors.apply(inventory_mode, colors.style('info'), bold=True)}"
-        )
+        print(f"{'Mode':<12} : {colors.apply(inventory_mode, colors.style('info'), bold=True)}")
     if identity_source or identity_quality:
         identity_bits: list[str] = []
         if identity_source:
@@ -828,30 +850,46 @@ def print_device_details(
         print()
         print(colors.apply("Evidence and Paths", colors.style("header"), bold=True))
         print(text_blocks.divider(width=18, style="divider"))
-        print(f"{'Latest harvest':<15} : {colors.apply(str(session_label), colors.style('accent'), bold=True)}")
+        print(
+            f"{'Latest harvest':<15} : {colors.apply(str(session_label), colors.style('accent'), bold=True)}"
+        )
         harvest_snapshot_id = latest_harvest.get("snapshot_id")
         inventory_snapshot_id = pipeline.get("inventory_snapshot_id")
         if harvest_snapshot_id is not None:
             if harvest_snapshot_id == inventory_snapshot_id:
-                print(f"{'Snapshot link':<15} : {colors.apply(f'inventory snapshot {harvest_snapshot_id}', colors.style('text'), bold=True)}")
+                print(
+                    f"{'Snapshot link':<15} : {colors.apply(f'inventory snapshot {harvest_snapshot_id}', colors.style('text'), bold=True)}"
+                )
                 session_state = str(latest_harvest.get("session_state") or "").strip().lower()
                 session_note = str(latest_harvest.get("session_note") or "").strip()
                 if session_state in {"drifted", "partial", "failed", "ineligible"}:
                     align_text = "needs review"
                     if session_note:
                         align_text += f" ({session_note})"
-                    print(f"{'Alignment':<15} : {colors.apply(align_text, colors.style('warning'), bold=True)}")
+                    print(
+                        f"{'Alignment':<15} : {colors.apply(align_text, colors.style('warning'), bold=True)}"
+                    )
                 else:
-                    print(f"{'Alignment':<15} : {colors.apply('current', colors.style('success'), bold=True)}")
+                    print(
+                        f"{'Alignment':<15} : {colors.apply('current', colors.style('success'), bold=True)}"
+                    )
             else:
-                print(f"{'Snapshot link':<15} : {colors.apply(f'harvest snapshot {harvest_snapshot_id}', colors.style('text'), bold=True)}")
-                print(f"{'Alignment':<15} : {colors.apply('stale vs latest inventory', colors.style('warning'), bold=True)}")
+                print(
+                    f"{'Snapshot link':<15} : {colors.apply(f'harvest snapshot {harvest_snapshot_id}', colors.style('text'), bold=True)}"
+                )
+                print(
+                    f"{'Alignment':<15} : {colors.apply('stale vs latest inventory', colors.style('warning'), bold=True)}"
+                )
         artifacts_root = latest_harvest.get("artifacts_root")
         receipts_root = latest_harvest.get("receipts_root")
         if artifacts_root:
-            print(f"{'Artifacts root':<15} : {colors.apply(str(artifacts_root), colors.style('muted'))}")
+            print(
+                f"{'Artifacts root':<15} : {colors.apply(str(artifacts_root), colors.style('muted'))}"
+            )
         if receipts_root:
-            print(f"{'Receipts root':<15} : {colors.apply(str(receipts_root), colors.style('muted'))}")
+            print(
+                f"{'Receipts root':<15} : {colors.apply(str(receipts_root), colors.style('muted'))}"
+            )
 
 
 def build_device_summaries(
@@ -928,6 +966,7 @@ def print_dashboard(
 
     # Device Analysis menu (sequential, no gaps)
     from .actions import build_main_menu_options
+
     options = build_main_menu_options(active_details)
     _render_grouped_actions(options)
 
@@ -947,9 +986,7 @@ def print_dashboard(
         print(panel)
 
 
-def resolve_active_device(
-    devices: list[dict[str, str | None]]
-) -> dict[str, str | None | None]:
+def resolve_active_device(devices: list[dict[str, str | None]]) -> dict[str, str | None | None]:
     return device_service.resolve_active_device(devices)
 
 

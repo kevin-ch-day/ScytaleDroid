@@ -75,6 +75,7 @@ from scytaledroid.DynamicAnalysis.scenarios import (
 )
 from scytaledroid.DynamicAnalysis.telemetry.sampler import TelemetrySampler
 from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    artifact_relative_path,
     dynamic_evidence_root,
     ensure_legacy_dynamic_symlink,
 )
@@ -102,9 +103,36 @@ class DynamicRunOrchestrator:
 
     def run(self) -> tuple[RunManifest, Path, dict[str, object]]:
         dynamic_run_id = str(uuid.uuid4())
-        output_root = Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
+        output_root = (
+            Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
+        )
         run_dir = output_root / dynamic_run_id
-        writer = EvidencePackWriter(run_dir)
+        self._startup_complete = False
+        writer = None
+        try:
+            writer = EvidencePackWriter(run_dir)
+            return self._run_initialized(dynamic_run_id, writer)
+        except PlanValidationError:
+            raise
+        except Exception as exc:
+            if self._startup_complete:
+                raise
+            from .startup_failure import seal_startup_failure
+
+            self.logger.exception("Dynamic evidence workspace initialization failed")
+            try:
+                manifest, run_dir, details = seal_startup_failure(
+                    self.config, dynamic_run_id, run_dir, writer, exc
+                )
+                return manifest, run_dir, {"startup_failure": details}
+            finally:
+                logging_engine.close_dynamic_run_logger(dynamic_run_id)
+
+    def _run_initialized(
+        self, dynamic_run_id: str, writer: EvidencePackWriter
+    ) -> tuple[RunManifest, Path, dict[str, object]]:
+        run_dir = writer.run_dir
+
         writer.ensure_layout()
         ensure_legacy_dynamic_symlink(run_dir)
         # Protect active runs from being pruned as "incomplete" before the final
@@ -212,7 +240,9 @@ class DynamicRunOrchestrator:
             notes_dir=writer.notes_dir,
             interactive=self.config.interactive,
             run_profile=(protocol or {}).get("run_profile") if isinstance(protocol, dict) else None,
-            run_sequence=(protocol or {}).get("run_sequence") if isinstance(protocol, dict) else None,
+            run_sequence=(protocol or {}).get("run_sequence")
+            if isinstance(protocol, dict)
+            else None,
             interaction_level=getattr(self.config, "interaction_level", None),
             messaging_activity=getattr(self.config, "messaging_activity", None),
             counts_toward_completion=getattr(self.config, "counts_toward_completion", None),
@@ -261,6 +291,7 @@ class DynamicRunOrchestrator:
         manifest.started_at = self._now()
         event_logger = RunEventLogger(run_ctx)
         telemetry_payload: dict[str, object] = {}
+        self._startup_complete = True
         try:
             if self._last_plan_validation:
                 event_logger.log(
@@ -285,30 +316,66 @@ class DynamicRunOrchestrator:
             env_snapshot = env_manager.prepare(run_ctx)
             manifest.environment.update(env_snapshot.metadata)
             manifest.add_artifacts(env_snapshot.artifacts)
-            event_logger.log("environment_prepared", {"artifact_count": len(env_snapshot.artifacts)})
+            event_logger.log(
+                "environment_prepared", {"artifact_count": len(env_snapshot.artifacts)}
+            )
 
             target_manager = TargetManager()
             target_snapshot = target_manager.prepare(run_ctx)
             if target_snapshot.metadata:
                 manifest.target.update(target_snapshot.metadata)
-                plan_identity = plan_payload.get("run_identity") if isinstance(plan_payload, dict) and isinstance(plan_payload.get("run_identity"), dict) else {}
+                plan_identity = (
+                    plan_payload.get("run_identity")
+                    if isinstance(plan_payload, dict)
+                    and isinstance(plan_payload.get("run_identity"), dict)
+                    else {}
+                )
                 manifest.target["identity_checked_at_start_utc"] = self._now()
                 manifest.target["identity_start"] = {
-                    "package_name_lc": str(plan_identity.get("package_name_lc") or plan_payload.get("package_name") or "").strip().lower() if isinstance(plan_payload, dict) else None,
-                    "version_code": str(plan_identity.get("version_code") or plan_payload.get("version_code") or "").strip() if isinstance(plan_payload, dict) else None,
+                    "package_name_lc": str(
+                        plan_identity.get("package_name_lc")
+                        or plan_payload.get("package_name")
+                        or ""
+                    )
+                    .strip()
+                    .lower()
+                    if isinstance(plan_payload, dict)
+                    else None,
+                    "version_code": str(
+                        plan_identity.get("version_code") or plan_payload.get("version_code") or ""
+                    ).strip()
+                    if isinstance(plan_payload, dict)
+                    else None,
                     "base_apk_sha256": plan_identity.get("base_apk_sha256"),
                     "artifact_set_hash": plan_identity.get("artifact_set_hash"),
                     "artifact_set_hash_version": plan_identity.get("artifact_set_hash_version"),
-                    "signer_set_hash": plan_identity.get("signer_set_hash") or plan_identity.get("signer_digest"),
-                    "observed_signer_set_hash": (target_snapshot.metadata or {}).get("signer_set_hash"),
-                    "observed_signer_primary_digest": (target_snapshot.metadata or {}).get("signer_primary_digest"),
+                    "signer_set_hash": plan_identity.get("signer_set_hash")
+                    or plan_identity.get("signer_digest"),
+                    "observed_signer_set_hash": (target_snapshot.metadata or {}).get(
+                        "signer_set_hash"
+                    ),
+                    "observed_signer_primary_digest": (target_snapshot.metadata or {}).get(
+                        "signer_primary_digest"
+                    ),
                     "static_handoff_hash": plan_identity.get("static_handoff_hash"),
-                    "observed_package_name_lc": str((target_snapshot.metadata or {}).get("package_name") or "").strip().lower(),
-                    "observed_version_code": str((target_snapshot.metadata or {}).get("version_code") or "").strip() or None,
-                    "user_id": str((target_snapshot.metadata or {}).get("user_id") or "").strip() or "0",
-                    "first_install_time": (target_snapshot.metadata or {}).get("first_install_time"),
+                    "observed_package_name_lc": str(
+                        (target_snapshot.metadata or {}).get("package_name") or ""
+                    )
+                    .strip()
+                    .lower(),
+                    "observed_version_code": str(
+                        (target_snapshot.metadata or {}).get("version_code") or ""
+                    ).strip()
+                    or None,
+                    "user_id": str((target_snapshot.metadata or {}).get("user_id") or "").strip()
+                    or "0",
+                    "first_install_time": (target_snapshot.metadata or {}).get(
+                        "first_install_time"
+                    ),
                     "last_update_time": (target_snapshot.metadata or {}).get("last_update_time"),
-                    "installer_package_name": (target_snapshot.metadata or {}).get("installer_package_name"),
+                    "installer_package_name": (target_snapshot.metadata or {}).get(
+                        "installer_package_name"
+                    ),
                 }
             manifest.add_artifacts(target_snapshot.artifacts)
             event_logger.log("target_prepared", {"artifact_count": len(target_snapshot.artifacts)})
@@ -384,7 +451,9 @@ class DynamicRunOrchestrator:
                     scenario_interrupted_reason = "ABORTED_DISCARD"
                     abort_discard_requested = True
                     now = datetime.now(UTC)
-                    event_logger.log("scenario_aborted_discard", {"reason": scenario_interrupted_reason})
+                    event_logger.log(
+                        "scenario_aborted_discard", {"reason": scenario_interrupted_reason}
+                    )
                     scenario_result = ScenarioResult(
                         started_at=host_start,
                         ended_at=now,
@@ -402,7 +471,9 @@ class DynamicRunOrchestrator:
                 except KeyboardInterrupt:
                     scenario_interrupted_reason = "INTERRUPTED"
                     now = datetime.now(UTC)
-                    event_logger.log("scenario_interrupted", {"reason": scenario_interrupted_reason})
+                    event_logger.log(
+                        "scenario_interrupted", {"reason": scenario_interrupted_reason}
+                    )
                     scenario_result = ScenarioResult(
                         started_at=host_start,
                         ended_at=now,
@@ -457,7 +528,9 @@ class DynamicRunOrchestrator:
                     ),
                 }
             )
-            actual_duration_s = int((scenario_result.ended_at - scenario_result.started_at).total_seconds())
+            actual_duration_s = int(
+                (scenario_result.ended_at - scenario_result.started_at).total_seconds()
+            )
             manifest.operator["actual_duration_s"] = actual_duration_s
             if isinstance(scenario_result.protocol, dict):
                 protocol = scenario_result.protocol
@@ -512,7 +585,9 @@ class DynamicRunOrchestrator:
                         "call_activity_foreground_component": protocol.get(
                             "call_activity_foreground_component"
                         ),
-                        "script_call_in_non_call_template": protocol.get("script_call_in_non_call_template"),
+                        "script_call_in_non_call_template": protocol.get(
+                            "script_call_in_non_call_template"
+                        ),
                         "ai_used": protocol.get("ai_used"),
                         "ai_provider": protocol.get("ai_provider"),
                         "ai_prompt_id": protocol.get("ai_prompt_id"),
@@ -521,7 +596,9 @@ class DynamicRunOrchestrator:
                         "stopped_early": protocol.get("stopped_early"),
                         "terminal_hold_finalize": protocol.get("terminal_hold_finalize"),
                         "script_manual_override": protocol.get("script_manual_override"),
-                        "script_manual_override_reason": protocol.get("script_manual_override_reason"),
+                        "script_manual_override_reason": protocol.get(
+                            "script_manual_override_reason"
+                        ),
                     }
                 )
                 profile_override = str(protocol.get("profile_override") or "").strip()
@@ -534,14 +611,18 @@ class DynamicRunOrchestrator:
             else:
                 profile = str(getattr(run_ctx, "run_profile", "") or "").strip().lower()
                 if profile.startswith("baseline"):
-                    manifest.operator.setdefault("not_applicable", {"script": profile or "baseline"})
+                    manifest.operator.setdefault(
+                        "not_applicable", {"script": profile or "baseline"}
+                    )
             interaction_level = (
                 "minimal"
                 if getattr(scenario_result, "interaction_level", None) == "idle"
                 else getattr(scenario_result, "interaction_level", None)
             )
             if isinstance(scenario_result.protocol, dict):
-                interaction_override = str(scenario_result.protocol.get("interaction_level_override") or "").strip()
+                interaction_override = str(
+                    scenario_result.protocol.get("interaction_level_override") or ""
+                ).strip()
                 if interaction_override:
                     interaction_level = interaction_override
             # If the scenario runner didn't provide an interaction level, derive a
@@ -574,7 +655,9 @@ class DynamicRunOrchestrator:
                 run_status = "degraded"
             for observer in self.observers:
                 observer_record = next(
-                    existing for existing in manifest.observers if existing.observer_id == observer.observer_id
+                    existing
+                    for existing in manifest.observers
+                    if existing.observer_id == observer.observer_id
                 )
                 if observer_record.status == "skipped":
                     event_logger.log(
@@ -618,25 +701,44 @@ class DynamicRunOrchestrator:
             target_finalize = target_manager.finalize(run_ctx)
             if target_finalize.metadata:
                 manifest.target.update(target_finalize.metadata)
-            identity_end_pkg = str((target_finalize.metadata or {}).get("package_name_end") or "").strip().lower()
-            identity_end_ver = str((target_finalize.metadata or {}).get("version_code_end") or "").strip() or None
+            identity_end_pkg = (
+                str((target_finalize.metadata or {}).get("package_name_end") or "").strip().lower()
+            )
+            identity_end_ver = (
+                str((target_finalize.metadata or {}).get("version_code_end") or "").strip() or None
+            )
             if identity_end_pkg or identity_end_ver:
                 manifest.target["identity_checked_at_end_utc"] = self._now()
                 manifest.target["identity_end"] = {
                     "observed_package_name_lc": identity_end_pkg or None,
                     "observed_version_code": identity_end_ver,
-                    "observed_signer_set_hash": (target_finalize.metadata or {}).get("signer_set_hash_end"),
-                    "observed_signer_primary_digest": (target_finalize.metadata or {}).get("signer_primary_digest_end"),
-                    "user_id": str((target_finalize.metadata or {}).get("user_id_end") or "").strip() or "0",
-                    "first_install_time": (target_finalize.metadata or {}).get("first_install_time_end"),
-                    "last_update_time": (target_finalize.metadata or {}).get("last_update_time_end"),
-                    "installer_package_name": (target_finalize.metadata or {}).get("installer_package_name_end"),
+                    "observed_signer_set_hash": (target_finalize.metadata or {}).get(
+                        "signer_set_hash_end"
+                    ),
+                    "observed_signer_primary_digest": (target_finalize.metadata or {}).get(
+                        "signer_primary_digest_end"
+                    ),
+                    "user_id": str(
+                        (target_finalize.metadata or {}).get("user_id_end") or ""
+                    ).strip()
+                    or "0",
+                    "first_install_time": (target_finalize.metadata or {}).get(
+                        "first_install_time_end"
+                    ),
+                    "last_update_time": (target_finalize.metadata or {}).get(
+                        "last_update_time_end"
+                    ),
+                    "installer_package_name": (target_finalize.metadata or {}).get(
+                        "installer_package_name_end"
+                    ),
                 }
             manifest.add_artifacts(target_finalize.artifacts)
             event_logger.log("target_finalized", {"artifact_count": len(target_finalize.artifacts)})
             env_finalize = env_manager.finalize(run_ctx)
             manifest.add_artifacts(env_finalize.artifacts)
-            event_logger.log("environment_finalized", {"artifact_count": len(env_finalize.artifacts)})
+            event_logger.log(
+                "environment_finalized", {"artifact_count": len(env_finalize.artifacts)}
+            )
             self._emit_marker(run_ctx, "RUN_END")
             event_logger.log("run_ended")
             marker_artifact = self._marker_artifact(run_ctx)
@@ -680,7 +782,18 @@ class DynamicRunOrchestrator:
             overlap = write_static_dynamic_overlap(manifest, run_dir, event_logger=event_logger)
             if overlap:
                 outputs.append(overlap)
-            tier = (manifest.operator or {}).get("tier") if isinstance(manifest.operator, dict) else None
+            from scytaledroid.DynamicAnalysis.pcap.hostname_overlap_v2 import (
+                write_hostname_overlap_v2,
+            )
+
+            overlap_v2 = write_hostname_overlap_v2(manifest, run_dir)
+            if overlap_v2:
+                outputs.append(overlap_v2)
+            tier = (
+                (manifest.operator or {}).get("tier")
+                if isinstance(manifest.operator, dict)
+                else None
+            )
             if not (tier and str(tier).lower() == "dataset") and not abort_discard_requested:
                 update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
 
@@ -689,12 +802,18 @@ class DynamicRunOrchestrator:
                 try:
                     entry = {
                         "pcap_size_bytes": next(
-                            (a.size_bytes for a in manifest.artifacts if a.type == "pcapdroid_capture"),
+                            (
+                                a.size_bytes
+                                for a in manifest.artifacts
+                                if a.type == "pcapdroid_capture"
+                            ),
                             0,
                         )
                     }
                     entry.update(_netstats_summary(run_dir))
-                    validity = evaluate_dataset_validity(run_dir, manifest, entry, DatasetTrackerConfig())
+                    validity = evaluate_dataset_validity(
+                        run_dir, manifest, entry, DatasetTrackerConfig()
+                    )
                     # First-class dataset validity (freeze/profile). Written only to manifest.dataset.
                     if isinstance(validity, dict):
                         current_ds = manifest.dataset if isinstance(manifest.dataset, dict) else {}
@@ -751,7 +870,9 @@ class DynamicRunOrchestrator:
                             ),
                         )
                         manifest.dataset["paper_eligible"] = bool(eligibility.paper_eligible)
-                        manifest.dataset["paper_exclusion_primary_reason_code"] = eligibility.reason_code
+                        manifest.dataset["paper_exclusion_primary_reason_code"] = (
+                            eligibility.reason_code
+                        )
                         manifest.dataset["paper_exclusion_all_reason_codes"] = list(
                             eligibility.all_reason_codes
                         )
@@ -774,7 +895,8 @@ class DynamicRunOrchestrator:
                                     (
                                         r
                                         for r in runs
-                                        if isinstance(r, dict) and r.get("run_id") == manifest.dynamic_run_id
+                                        if isinstance(r, dict)
+                                        and r.get("run_id") == manifest.dynamic_run_id
                                     ),
                                     None,
                                 )
@@ -786,7 +908,9 @@ class DynamicRunOrchestrator:
                             countable = tracker_row.get("countable")
                             if not isinstance(countable, bool):
                                 countable = bool(tracker_row.get("counts_toward_quota"))
-                            manifest.dataset["paper_eligible"] = bool(tracker_row.get("paper_eligible"))
+                            manifest.dataset["paper_eligible"] = bool(
+                                tracker_row.get("paper_eligible")
+                            )
                             manifest.dataset["paper_exclusion_primary_reason_code"] = (
                                 tracker_row.get("paper_exclusion_primary_reason_code")
                             )
@@ -799,14 +923,18 @@ class DynamicRunOrchestrator:
                         else:
                             manifest.dataset.setdefault("countable", True)
 
-                        verdict_source = tracker_row if isinstance(tracker_row, dict) else {
-                            "valid_dataset_run": manifest.dataset.get("valid_dataset_run"),
-                            "paper_eligible": manifest.dataset.get("paper_eligible"),
-                            "countable": manifest.dataset.get("countable"),
-                            "paper_exclusion_all_reason_codes": manifest.dataset.get(
-                                "paper_exclusion_all_reason_codes"
-                            ),
-                        }
+                        verdict_source = (
+                            tracker_row
+                            if isinstance(tracker_row, dict)
+                            else {
+                                "valid_dataset_run": manifest.dataset.get("valid_dataset_run"),
+                                "paper_eligible": manifest.dataset.get("paper_eligible"),
+                                "countable": manifest.dataset.get("countable"),
+                                "paper_exclusion_all_reason_codes": manifest.dataset.get(
+                                    "paper_exclusion_all_reason_codes"
+                                ),
+                            }
+                        )
                         technical_validity, protocol_compliance, cohort_eligibility = (
                             derive_three_verdicts_for_row(verdict_source)
                         )
@@ -850,7 +978,10 @@ class DynamicRunOrchestrator:
                     )
                     event_logger.log("dataset_validity_error", {"error": str(exc)})
                 # Fail-closed: dataset-tier runs must never leave validity unset.
-                if isinstance(manifest.dataset, dict) and manifest.dataset.get("valid_dataset_run") is None:
+                if (
+                    isinstance(manifest.dataset, dict)
+                    and manifest.dataset.get("valid_dataset_run") is None
+                ):
                     manifest.dataset.update(
                         {
                             "valid_dataset_run": False,
@@ -892,10 +1023,23 @@ class DynamicRunOrchestrator:
             try:
                 import time
 
-                strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
-                v3_scenario = str(getattr(self.config, "scenario_id", "") or "").strip() == "paper3_profile_v3"
+                strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }
+                v3_scenario = (
+                    str(getattr(self.config, "scenario_id", "") or "").strip()
+                    == "paper3_profile_v3"
+                )
                 want_check = v3_scenario and strict
-                if str(os.environ.get("SCYTALEDROID_V3_POSTRUN_CHECK") or "").strip().lower() in {"1", "true", "yes", "on"}:
+                if str(os.environ.get("SCYTALEDROID_V3_POSTRUN_CHECK") or "").strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }:
                     want_check = True
 
                 if want_check:
@@ -918,7 +1062,11 @@ class DynamicRunOrchestrator:
 
                             # Best-effort retry: PCAP file finalization can lag by a moment after
                             # observers stop. Retry avoids spurious "missing_window_scores_csv".
-                            output_root = Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
+                            output_root = (
+                                Path(self.config.output_root)
+                                if self.config.output_root
+                                else dynamic_evidence_root()
+                            )
                             last_exc: Exception | None = None
                             derive_result = None
                             for _i in range(2):
@@ -942,7 +1090,10 @@ class DynamicRunOrchestrator:
                             # This is independent of the sealed run_manifest.json.
                             try:
                                 if derive_result is not None:
-                                    writer.write_json("analysis/index/v1/v3_ml_derive.json", derive_result.__dict__)
+                                    writer.derived_writer().write_json(
+                                        "analysis/index/v1/v3_ml_derive.json",
+                                        derive_result.__dict__,
+                                    )
                             except Exception:
                                 pass
                         except Exception as exc:  # noqa: BLE001
@@ -971,7 +1122,9 @@ class DynamicRunOrchestrator:
                     )
                     # Write derived check artifact for audits (does not mutate sealed manifest).
                     try:
-                        writer.write_json("analysis/index/v1/v3_postrun_check.json", check.to_dict())
+                        writer.derived_writer().write_json(
+                            "analysis/index/v1/v3_postrun_check.json", check.to_dict()
+                        )
                     except Exception:
                         pass
             except Exception:
@@ -1029,7 +1182,7 @@ class DynamicRunOrchestrator:
                 plan_payload,
             )
             plan_artifact = ArtifactRecord(
-                relative_path=str(plan_path.relative_to(writer.run_dir)),
+                relative_path=artifact_relative_path(writer.run_dir, plan_path),
                 type="static_dynamic_plan",
                 sha256=None,
                 size_bytes=plan_path.stat().st_size,
@@ -1042,7 +1195,9 @@ class DynamicRunOrchestrator:
                 or plan_payload.get("profile")
                 or plan_payload.get("scope_label")
             )
-        static_context = compute_static_context(plan_payload if isinstance(plan_payload, dict) else None)
+        static_context = compute_static_context(
+            plan_payload if isinstance(plan_payload, dict) else None
+        )
         static_tags = static_context.get("tags") if isinstance(static_context, dict) else []
         manifest = RunManifest(
             run_manifest_version=1,
@@ -1085,7 +1240,8 @@ class DynamicRunOrchestrator:
                 "static_context": static_context,
                 "run_identity": (
                     dict(plan_payload.get("run_identity"))
-                    if isinstance(plan_payload, dict) and isinstance(plan_payload.get("run_identity"), dict)
+                    if isinstance(plan_payload, dict)
+                    and isinstance(plan_payload.get("run_identity"), dict)
                     else None
                 ),
                 "identity_checked_at_start_utc": None,
@@ -1101,8 +1257,12 @@ class DynamicRunOrchestrator:
                 "platform": platform.platform(),
                 "python_version": platform.python_version(),
                 # Frozen execution config (no env reads in execution paths).
-                "require_dynamic_schema": bool(getattr(self.config, "require_dynamic_schema", True)),
-                "observer_prompts_enabled": bool(getattr(self.config, "observer_prompts_enabled", False)),
+                "require_dynamic_schema": bool(
+                    getattr(self.config, "require_dynamic_schema", True)
+                ),
+                "observer_prompts_enabled": bool(
+                    getattr(self.config, "observer_prompts_enabled", False)
+                ),
                 "pcapdroid_api_key_present": bool(getattr(self.config, "pcapdroid_api_key", None)),
                 # Host toolchain audit payload for reproducibility. This is not a gate here
                 # (dataset-tier gating happens earlier), but recording it avoids "version drift"
@@ -1175,9 +1335,15 @@ class DynamicRunOrchestrator:
                     "tier": self.config.tier,
                     "sampling_rate_s": self.config.sampling_rate_s,
                     "min_pcap_bytes": effective_min_pcap_bytes,
-                    "require_dynamic_schema": bool(getattr(self.config, "require_dynamic_schema", True)),
-                    "observer_prompts_enabled": bool(getattr(self.config, "observer_prompts_enabled", False)),
-                    "pcapdroid_api_key_present": bool(getattr(self.config, "pcapdroid_api_key", None)),
+                    "require_dynamic_schema": bool(
+                        getattr(self.config, "require_dynamic_schema", True)
+                    ),
+                    "observer_prompts_enabled": bool(
+                        getattr(self.config, "observer_prompts_enabled", False)
+                    ),
+                    "pcapdroid_api_key_present": bool(
+                        getattr(self.config, "pcapdroid_api_key", None)
+                    ),
                     "duration_seconds": run_ctx.duration_seconds,
                     "scenario_id": run_ctx.scenario_id,
                     "device_serial": run_ctx.device_serial,
@@ -1232,7 +1398,10 @@ class DynamicRunOrchestrator:
                 "stage": "finalization",
             }
         )
-        if str((manifest.operator or {}).get("tier") or self.config.tier or "").lower() == "dataset":
+        if (
+            str((manifest.operator or {}).get("tier") or self.config.tier or "").lower()
+            == "dataset"
+        ):
             manifest.dataset.setdefault("valid_dataset_run", False)
             manifest.dataset.setdefault("invalid_reason_code", "FINALIZATION_ERROR")
             manifest.dataset["countable"] = False
@@ -1241,7 +1410,7 @@ class DynamicRunOrchestrator:
             manifest.add_artifacts(
                 [
                     ArtifactRecord(
-                        relative_path=str(error_path.relative_to(run_ctx.run_dir)),
+                        relative_path=artifact_relative_path(run_ctx.run_dir, error_path),
                         type="finalization_error",
                         sha256=None,
                         size_bytes=error_path.stat().st_size,
@@ -1321,18 +1490,20 @@ class DynamicRunOrchestrator:
             self.logger.warning(note)
             manifest.notes.append(note)
             return None
-        dest_path = writer.run_dir / "artifacts/dep/dep.json"
+        dest_path = writer._output_path("artifacts/dep/dep.json")
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(dep_path, dest_path)
         return ArtifactRecord(
-            relative_path=str(dest_path.relative_to(writer.run_dir)),
+            relative_path=artifact_relative_path(writer.run_dir, dest_path),
             type="dep_snapshot",
             sha256=None,
             size_bytes=dest_path.stat().st_size,
             produced_by="static_analysis",
         )
 
-    def _start_observers(self, run_ctx: RunContext) -> tuple[list[ObserverRecord], dict[str, object]]:
+    def _start_observers(
+        self, run_ctx: RunContext
+    ) -> tuple[list[ObserverRecord], dict[str, object]]:
         handles: dict[str, object] = {}
         records: list[ObserverRecord] = []
         for observer in self.observers:
@@ -1363,7 +1534,7 @@ class DynamicRunOrchestrator:
                 error_path.parent.mkdir(parents=True, exist_ok=True)
                 error_path.write_text(str(exc), encoding="utf-8")
                 artifact = ArtifactRecord(
-                    relative_path=str(error_path.relative_to(run_ctx.run_dir)),
+                    relative_path=artifact_relative_path(run_ctx.run_dir, error_path),
                     type="observer_error",
                     sha256=None,
                     size_bytes=error_path.stat().st_size,
@@ -1398,7 +1569,7 @@ class DynamicRunOrchestrator:
             error_path.parent.mkdir(parents=True, exist_ok=True)
             error_path.write_text(str(exc), encoding="utf-8")
             artifact = ArtifactRecord(
-                relative_path=str(error_path.relative_to(run_ctx.run_dir)),
+                relative_path=artifact_relative_path(run_ctx.run_dir, error_path),
                 type="observer_error",
                 sha256=None,
                 size_bytes=error_path.stat().st_size,
@@ -1435,7 +1606,7 @@ class DynamicRunOrchestrator:
         if not marker_path.exists():
             return None
         return ArtifactRecord(
-            relative_path=str(marker_path.relative_to(run_ctx.run_dir)),
+            relative_path=artifact_relative_path(run_ctx.run_dir, marker_path),
             type="run_markers",
             sha256=None,
             size_bytes=marker_path.stat().st_size,
@@ -1487,9 +1658,7 @@ class DynamicRunOrchestrator:
         try:
             if payload.get("device_time_utc_start"):
                 device_start = datetime.fromisoformat(str(payload["device_time_utc_start"]))
-                payload["drift_ms_start"] = int(
-                    (host_start - device_start).total_seconds() * 1000
-                )
+                payload["drift_ms_start"] = int((host_start - device_start).total_seconds() * 1000)
             if payload.get("device_time_utc_end"):
                 device_end = datetime.fromisoformat(str(payload["device_time_utc_end"]))
                 payload["drift_ms_end"] = int((host_end - device_end).total_seconds() * 1000)
@@ -1511,7 +1680,10 @@ class DynamicRunOrchestrator:
             if not validation.is_pass:
                 self.logger.warning(
                     "Dynamic plan validation failed",
-                    extra={"plan_path": self.config.plan_path, "validation": build_plan_validation_event(validation)},
+                    extra={
+                        "plan_path": self.config.plan_path,
+                        "validation": build_plan_validation_event(validation),
+                    },
                 )
                 raise PlanValidationError(validation)
             return payload
@@ -1544,9 +1716,21 @@ class DynamicRunOrchestrator:
     def _summarize_plan(self, plan_payload: dict[str, object] | None) -> dict[str, object] | None:
         if not plan_payload:
             return None
-        perms = plan_payload.get("permissions") if isinstance(plan_payload.get("permissions"), dict) else {}
-        network = plan_payload.get("network_targets") if isinstance(plan_payload.get("network_targets"), dict) else {}
-        risk_flags = plan_payload.get("risk_flags") if isinstance(plan_payload.get("risk_flags"), dict) else {}
+        perms = (
+            plan_payload.get("permissions")
+            if isinstance(plan_payload.get("permissions"), dict)
+            else {}
+        )
+        network = (
+            plan_payload.get("network_targets")
+            if isinstance(plan_payload.get("network_targets"), dict)
+            else {}
+        )
+        risk_flags = (
+            plan_payload.get("risk_flags")
+            if isinstance(plan_payload.get("risk_flags"), dict)
+            else {}
+        )
         declared = perms.get("declared") if isinstance(perms.get("declared"), list) else []
         dangerous = perms.get("dangerous") if isinstance(perms.get("dangerous"), list) else []
         high_value = perms.get("high_value") if isinstance(perms.get("high_value"), list) else []
@@ -1554,7 +1738,11 @@ class DynamicRunOrchestrator:
         domain_sources = (
             network.get("domain_sources") if isinstance(network.get("domain_sources"), list) else []
         )
-        cleartext = network.get("cleartext_domains") if isinstance(network.get("cleartext_domains"), list) else []
+        cleartext = (
+            network.get("cleartext_domains")
+            if isinstance(network.get("cleartext_domains"), list)
+            else []
+        )
         return {
             "declared_permissions_count": len(declared),
             "dangerous_permissions_count": len(dangerous),
@@ -1570,7 +1758,11 @@ class DynamicRunOrchestrator:
     def _build_permission_trigger_hint(self, plan_payload: dict[str, object] | None) -> str | None:
         if not plan_payload:
             return None
-        perms = plan_payload.get("permissions") if isinstance(plan_payload.get("permissions"), dict) else {}
+        perms = (
+            plan_payload.get("permissions")
+            if isinstance(plan_payload.get("permissions"), dict)
+            else {}
+        )
         high_value = perms.get("high_value") if isinstance(perms.get("high_value"), list) else []
         if high_value:
             return (

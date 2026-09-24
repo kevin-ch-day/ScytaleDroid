@@ -59,8 +59,14 @@ def dynamic_evidence_roots(*, include_legacy: bool = True) -> tuple[Path, ...]:
     return tuple(roots)
 
 
-def resolve_contained_path(root: Path, relative_path: str | Path) -> Path | None:
-    """Resolve a relative path only when it remains beneath ``root``.
+def resolve_contained_path(
+    root: Path, relative_path: str | Path, *, filesystem_path: bool = False
+) -> Path | None:
+    """Resolve a path only when it remains beneath ``root``.
+
+    By default input is a manifest-relative path. ``filesystem_path=True`` accepts
+    an absolute or cwd-relative filesystem path, never guesses between bases.
+    Parent traversal is rejected even when normalization would land inside root.
 
     Resolving both sides also rejects symlink escapes through an existing path
     component. Callers remain responsible for checking whether the target must
@@ -68,15 +74,24 @@ def resolve_contained_path(root: Path, relative_path: str | Path) -> Path | None
     """
 
     relative = Path(relative_path)
-    if relative.is_absolute():
+    if ".." in relative.parts or (relative.is_absolute() and not filesystem_path):
         return None
     try:
         resolved_root = root.resolve(strict=False)
-        candidate = (root / relative).resolve(strict=False)
+        candidate = (relative if filesystem_path else root / relative).resolve(strict=False)
         candidate.relative_to(resolved_root)
     except (OSError, RuntimeError, ValueError):
         return None
     return candidate
+
+
+def artifact_relative_path(root: Path, path: Path) -> str:
+    """Convert a contained filesystem artifact to a stable manifest-relative path."""
+    candidate = resolve_contained_path(root, path, filesystem_path=True)
+    resolved_root = root.resolve(strict=False)
+    if candidate is None or candidate == resolved_root:
+        raise ValueError(f"Evidence artifact path must remain inside run directory: {path!s}")
+    return candidate.relative_to(resolved_root).as_posix()
 
 
 def normalize_run_id(value: object) -> str | None:
@@ -180,7 +195,9 @@ def ensure_legacy_dynamic_symlink(run_dir: Path) -> Path | None:
         if link_path.exists() or link_path.is_symlink():
             return link_path
         # Relative aliases remain valid when data/ and output/ move together.
-        link_path.symlink_to(_relative_alias_target(run_dir, link_path.parent), target_is_directory=True)
+        link_path.symlink_to(
+            _relative_alias_target(run_dir, link_path.parent), target_is_directory=True
+        )
         return link_path
     except OSError:
         return None
@@ -195,7 +212,11 @@ def inspect_legacy_dynamic_aliases(
 
     canonical = canonical_root or dynamic_evidence_root()
     legacy = legacy_root or legacy_dynamic_evidence_root()
-    canonical_runs = {path.name: path for path in canonical.iterdir() if path.is_dir()} if canonical.is_dir() else {}
+    canonical_runs = (
+        {path.name: path for path in canonical.iterdir() if path.is_dir()}
+        if canonical.is_dir()
+        else {}
+    )
     valid = missing = stale = conflicts = absolute_targets = 0
     for run_id, run_dir in canonical_runs.items():
         alias = legacy / run_id
@@ -257,21 +278,35 @@ def rebuild_legacy_dynamic_aliases(
         if alias_matches_expected and not alias_is_absolute:
             continue
         if alias.exists() and not alias.is_symlink():
-            repairs.append(LegacyDynamicAliasRepair(run_dir.name, "conflict", "existing non-symlink left unchanged"))
+            repairs.append(
+                LegacyDynamicAliasRepair(
+                    run_dir.name, "conflict", "existing non-symlink left unchanged"
+                )
+            )
             continue
-        action = "create" if not alias.is_symlink() else "replace-absolute" if alias_matches_expected else "replace-stale"
+        action = (
+            "create"
+            if not alias.is_symlink()
+            else "replace-absolute"
+            if alias_matches_expected
+            else "replace-stale"
+        )
         repairs.append(LegacyDynamicAliasRepair(run_dir.name, action, str(expected)))
         if apply:
             legacy.mkdir(parents=True, exist_ok=True)
             if alias.is_symlink():
                 alias.unlink()
-            alias.symlink_to(_relative_alias_target(expected, alias.parent), target_is_directory=True)
+            alias.symlink_to(
+                _relative_alias_target(expected, alias.parent), target_is_directory=True
+            )
 
     if prune_orphans and legacy.is_dir():
         for alias in sorted(legacy.iterdir(), key=lambda path: path.name):
             if alias.name in canonical_runs or not alias.is_symlink():
                 continue
-            repairs.append(LegacyDynamicAliasRepair(alias.name, "remove-orphan", "no canonical evidence pack"))
+            repairs.append(
+                LegacyDynamicAliasRepair(alias.name, "remove-orphan", "no canonical evidence pack")
+            )
             if apply:
                 alias.unlink()
     return tuple(repairs)
@@ -342,6 +377,7 @@ def _confine_to_allowed_roots(path: Path) -> Path | None:
 
 
 __all__ = [
+    "artifact_relative_path",
     "bound_manifest_run_id",
     "dynamic_evidence_root",
     "dynamic_evidence_roots",

@@ -11,6 +11,11 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from androguard.core.apk import APK, FileNotPresent
+from scytaledroid.StaticAnalysis.engine.androguard_arsc_compat import (
+    apply_androguard_arsc_compat,
+)
+
+apply_androguard_arsc_compat()
 
 
 def _extract_bounds_warnings(text: str) -> list[str]:

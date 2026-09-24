@@ -15,9 +15,8 @@ class ArtifactRecord:
     relative_path: str
     type: str
     produced_by: str
-    # Best-effort audit hash. For Paper #2 immutability, rely on the dataset-level
-    # freeze manifest checksums. Mutable artifacts (e.g., JSONL logs) should omit
-    # sha256 to avoid integrity failures "by construction".
+    # Producers may defer hashing until canonical final sealing. V2 fills hashes
+    # after writers stop; historical V1 records retain their original semantics.
     sha256: str | None = None
     size_bytes: int | None = None
     origin: str | None = None
@@ -62,6 +61,7 @@ class RunManifest:
     outputs: list[ArtifactRecord] = field(default_factory=list)
     operator: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    evidence_integrity: dict[str, Any] = field(default_factory=dict)
 
     def add_artifacts(self, records: list[ArtifactRecord]) -> None:
         self.artifacts.extend(records)
@@ -141,6 +141,7 @@ def manifest_to_dict(manifest: RunManifest) -> dict[str, Any]:
         ],
         "operator": manifest.operator,
         "notes": manifest.notes,
+        "evidence_integrity": manifest.evidence_integrity,
     }
 
 

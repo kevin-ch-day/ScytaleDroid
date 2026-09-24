@@ -40,7 +40,8 @@ def persist_dynamic_summary(
     config: DynamicSessionConfig, result: DynamicSessionResult, payload: dict[str, Any]
 ) -> None:
     if not _require_dynamic_schema(require=bool(getattr(config, "require_dynamic_schema", True))):
-        return
+        # The engine records this as disabled, rather than falsely claiming a DB write.
+        raise NotImplementedError("Dynamic persistence skipped: required schema unavailable.")
     dynamic_run_id = result.dynamic_run_id or payload.get("dynamic_run_id")
     if not dynamic_run_id:
         raise RuntimeError("dynamic_run_id missing; cannot persist dynamic session")
@@ -74,13 +75,19 @@ def persist_dynamic_summary(
     )
 
     duration_seconds = config.duration_seconds
-    if (not duration_seconds or int(duration_seconds) == 0) and result.started_at and result.ended_at:
+    if (
+        (not duration_seconds or int(duration_seconds) == 0)
+        and result.started_at
+        and result.ended_at
+    ):
         duration_seconds = int((result.ended_at - result.started_at).total_seconds())
     sampling_duration_seconds = qa_stats.get("sampling_duration_seconds")
     clock_alignment_delta_s = None
     try:
         if duration_seconds is not None and sampling_duration_seconds is not None:
-            clock_alignment_delta_s = abs(float(duration_seconds) - float(sampling_duration_seconds))
+            clock_alignment_delta_s = abs(
+                float(duration_seconds) - float(sampling_duration_seconds)
+            )
     except (TypeError, ValueError):
         clock_alignment_delta_s = None
     session_row = {
@@ -195,11 +202,13 @@ def _insert_dynamic_session(row: Mapping[str, Any]) -> None:
     placeholders = ", ".join(["%s"] * len(columns))
     updates = ", ".join([f"{col}=VALUES({col})" for col in columns if col != "dynamic_run_id"])
     sql = f"""
-        INSERT INTO dynamic_sessions ({', '.join(columns)})
+        INSERT INTO dynamic_sessions ({", ".join(columns)})
         VALUES ({placeholders})
         ON DUPLICATE KEY UPDATE {updates}
     """
-    core_q.run_sql_write(sql, tuple(row[col] for col in columns), query_name="dynamic.sessions.upsert")
+    core_q.run_sql_write(
+        sql, tuple(row[col] for col in columns), query_name="dynamic.sessions.upsert"
+    )
 
 
 def _index_derived_dynamic_artifacts(
@@ -268,7 +277,11 @@ def _index_derived_dynamic_artifacts(
         append_run_event(
             run_dir,
             "dynamic_domain_context_indexed",
-            {"dynamic_run_id": dynamic_run_id, "package_name": package_name, "row_count": domain_rows},
+            {
+                "dynamic_run_id": dynamic_run_id,
+                "package_name": package_name,
+                "row_count": domain_rows,
+            },
         )
         _LOGGER.info(
             "Dynamic domain context indexed",
@@ -341,14 +354,14 @@ def _insert_dynamic_issues(rows: Iterable[Mapping[str, Any]]) -> None:
     core_q.run_sql_many(sql, data, query_name="dynamic.issues.insert")
 
 
-def _persist_telemetry(dynamic_run_id: str, payload: Mapping[str, Any], *, tier: str | None = None) -> None:
+def _persist_telemetry(
+    dynamic_run_id: str, payload: Mapping[str, Any], *, tier: str | None = None
+) -> None:
     process_rows = payload.get("telemetry_process") or []
     network_rows = payload.get("telemetry_network") or []
     if tier == "dataset":
         network_rows = [
-            row
-            for row in network_rows
-            if row.get("source") in {"netstats", "netstats_missing"}
+            row for row in network_rows if row.get("source") in {"netstats", "netstats_missing"}
         ]
     if process_rows:
         _insert_process_rows(dynamic_run_id, process_rows)
@@ -472,7 +485,9 @@ def _collect_issue_rows(
     return issues
 
 
-def _evaluate_grade(payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]) -> tuple[str, list[object]]:
+def _evaluate_grade(
+    payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]
+) -> tuple[str, list[object]]:
     reasons: list[object] = []
     status = str(payload.get("status") or "").lower()
     if status == "blocked":
@@ -518,6 +533,12 @@ def _evaluate_grade(payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]) ->
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             except Exception:
                 manifest = {}
+            if manifest.get("evidence_integrity"):
+                from scytaledroid.DynamicAnalysis.core.sealing_v2 import integrity_grade_reasons
+
+                reasons.extend(
+                    integrity_grade_reasons(manifest_path.parent, manifest["evidence_integrity"])
+                )
             artifacts = []
             artifacts.extend(manifest.get("artifacts") or [])
             artifacts.extend(manifest.get("outputs") or [])
@@ -555,13 +576,21 @@ def _evaluate_grade(payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]) ->
             if row["artifact_type"] not in required_types:
                 continue
             if not row.get("sha256"):
-                reasons.append({"code": "registry_artifact_unhashed", "artifact_type": row["artifact_type"]})
+                reasons.append(
+                    {"code": "registry_artifact_unhashed", "artifact_type": row["artifact_type"]}
+                )
             if row.get("origin") == "device" and row.get("pull_status") != "pulled":
-                reasons.append({"code": "artifact_not_pulled", "artifact_type": row["artifact_type"]})
+                reasons.append(
+                    {"code": "artifact_not_pulled", "artifact_type": row["artifact_type"]}
+                )
             if row.get("origin") in {"unknown", None}:
-                reasons.append({"code": "artifact_origin_unknown", "artifact_type": row["artifact_type"]})
+                reasons.append(
+                    {"code": "artifact_origin_unknown", "artifact_type": row["artifact_type"]}
+                )
             if row.get("pull_status") in {"unknown", None}:
-                reasons.append({"code": "artifact_pull_status_unknown", "artifact_type": row["artifact_type"]})
+                reasons.append(
+                    {"code": "artifact_pull_status_unknown", "artifact_type": row["artifact_type"]}
+                )
 
     if payload.get("pcap_required"):
         if not pcap_meta.get("pcap_relpath"):
@@ -739,7 +768,11 @@ def _extract_dataset_truth(
         context="extracting dataset truth",
         dynamic_run_id=str(payload.get("dynamic_run_id") or "") or None,
     )
-    manifest_dataset = manifest.get("dataset") if isinstance(manifest, dict) and isinstance(manifest.get("dataset"), dict) else {}
+    manifest_dataset = (
+        manifest.get("dataset")
+        if isinstance(manifest, dict) and isinstance(manifest.get("dataset"), dict)
+        else {}
+    )
     payload_dataset = payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
     dataset = dict(manifest_dataset or {})
     if payload_dataset:
@@ -768,7 +801,8 @@ def _extract_dataset_truth(
     baseline_not_idle = _dataset_bool_to_db(baseline_not_idle_source)
     baseline_not_idle_reasons = (
         tracker_truth.get("baseline_not_idle_reasons")
-        if isinstance(tracker_truth, dict) and isinstance(tracker_truth.get("baseline_not_idle_reasons"), list)
+        if isinstance(tracker_truth, dict)
+        and isinstance(tracker_truth.get("baseline_not_idle_reasons"), list)
         else dataset.get("baseline_not_idle_reasons")
     )
     if not isinstance(baseline_not_idle_reasons, list):
@@ -884,7 +918,15 @@ def _extract_plan_identity(plan_payload: Mapping[str, Any]) -> dict[str, Any]:
     identity = extract_plan_identity(dict(plan_payload))
     run_identity = plan_payload.get("run_identity") or {}
     if isinstance(run_identity, dict):
-        for key in ("base_apk_sha256", "artifact_set_hash", "artifact_set_hash_version", "apk_set_id", "run_signature", "run_signature_version", "static_handoff_hash"):
+        for key in (
+            "base_apk_sha256",
+            "artifact_set_hash",
+            "artifact_set_hash_version",
+            "apk_set_id",
+            "run_signature",
+            "run_signature_version",
+            "static_handoff_hash",
+        ):
             if run_identity.get(key) and not identity.get(key):
                 identity[key] = run_identity[key]
     for key in ("version_name", "version_code"):
@@ -916,7 +958,9 @@ def _extract_qa_stats(payload: Mapping[str, Any]) -> dict[str, Any]:
         "sample_max_delta_s": _safe_float(stats.get("sample_max_delta_s")),
         "sample_max_gap_s": _safe_float(stats.get("sample_max_gap_s")),
         "sample_first_gap_s": _safe_float(stats.get("sample_first_gap_s")),
-        "sample_max_gap_excluding_first_s": _safe_float(stats.get("sample_max_gap_excluding_first_s")),
+        "sample_max_gap_excluding_first_s": _safe_float(
+            stats.get("sample_max_gap_excluding_first_s")
+        ),
     }
 
 
@@ -1072,7 +1116,9 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
                 if isinstance(meta_valid, bool):
                     pcap_valid = meta_valid
             if not pcap_relpath and resolved_path:
-                resolved_name = meta_payload.get("resolved_pcap_name") or meta_payload.get("pcap_name")
+                resolved_name = meta_payload.get("resolved_pcap_name") or meta_payload.get(
+                    "pcap_name"
+                )
                 if isinstance(resolved_name, str) and resolved_name:
                     candidate = resolved_path / "artifacts" / "pcapdroid_capture" / resolved_name
                     if candidate.exists():

@@ -64,39 +64,19 @@ def _quota_reason_text(summary, *, quota_valid: int) -> str:
 def build_dynamic_menu_sections() -> DynamicMenuSections:
     return DynamicMenuSections(
         primary_actions=[
-            MenuOption(
-                "1",
-                "Single app run",
-                description="start a focused dynamic run for one app by name or package",
-                badge="primary",
-            ),
-            MenuOption(
-                "2",
-                "Current-build collection queue",
-                description="open the full live cohort queue for current-build collection",
-            ),
-            MenuOption(
-                "3",
-                "Paper-freeze readiness",
-                description="review build-selected paper target readiness and latest freeze export",
-            ),
+            MenuOption("1", "Run an app", badge="primary"),
+            MenuOption("2", "Continue collection (guided research)"),
+            MenuOption("9", "Recent runs"),
         ],
         validation=[
-            MenuOption(
-                "4", "Verify capture environment", description="host PCAP tools and prerequisites"
-            ),
-            MenuOption("5", "State summary", description="cohort health and collection progress"),
-            MenuOption(
-                "6", "Archive readiness", description="freeze gate and publication blockers"
-            ),
-            MenuOption("7", "Change cohort", description="switch active research dataset scope"),
+            MenuOption("7", "Research cohorts"),
+            MenuOption("3", "Research readiness / qualification"),
+            MenuOption("5", "Collection summary"),
+            MenuOption("6", "Archive readiness"),
         ],
         maintenance=[
-            MenuOption(
-                "8",
-                "Maintenance / Advanced",
-                description="reindex, cleanup, legacy tools, and operator exports",
-            ),
+            MenuOption("4", "Environment diagnostics"),
+            MenuOption("8", "Maintenance"),
         ],
         archive_export=[],
     )
@@ -141,6 +121,15 @@ def _cached_overview_state(cohort_label: str) -> tuple[Any, dict[str, object], d
 
 
 def render_dynamic_menu_overview() -> None:
+    try:
+        device = device_manager.describe_active_device() or "none selected"
+    except Exception:
+        device = "unavailable"
+    print(f"Device: {device}")
+    print("Capture environment: checked when starting a capture; diagnostics available below.")
+
+
+def render_research_menu_overview() -> None:
     cohort_label = active_research_cohort_label()
     try:
         summary, handoff, quota_summary = _cached_overview_state(cohort_label)

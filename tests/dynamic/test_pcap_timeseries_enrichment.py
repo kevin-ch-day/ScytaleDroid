@@ -71,7 +71,9 @@ def test_tls_name_visibility_marks_udp_service_port_signal_as_heuristic() -> Non
     assert visibility["tls_name_metadata_limited"] is True
 
 
-def test_scan_pcap_timeseries_includes_direction_flow_burst_and_visibility(monkeypatch, tmp_path: Path) -> None:
+def test_scan_pcap_timeseries_includes_direction_flow_burst_and_visibility(
+    monkeypatch, tmp_path: Path
+) -> None:
     pcap_path = tmp_path / "sample.pcap"
     pcap_path.write_bytes(b"pcap")
 
@@ -106,3 +108,68 @@ def test_scan_pcap_timeseries_includes_direction_flow_burst_and_visibility(monke
     assert stats["tls_quic_visibility"]["tls_alpn_unique_count"] == 1
     assert stats["tls_quic_visibility"]["tls_name_metadata_class"] == "sni_observed"
     assert stats["tls_quic_visibility"]["tls_name_metadata_limited"] is False
+
+
+def test_icmp_quoted_udp_is_not_an_additional_transport_flow():
+    from scytaledroid.DynamicAnalysis.pcap.enrichment import flow_key, parse_packet_metadata_line
+
+    row = "1\t150\t10.0.2.2,10.0.2.15\t10.0.2.15,224.0.0.251\t\t\t5353\t5353\t\t\t\t\teth:ip:icmp:ip:udp:mdns\t\t"
+    packet = parse_packet_metadata_line(row)
+    assert packet.length == 150
+    assert packet.src_ip == "10.0.2.2" and packet.dst_ip == "10.0.2.15"
+    assert packet.transport == "icmp" and packet.src_port is None
+    assert flow_key(packet) is None
+
+
+def test_ipv6_dns_has_real_addresses_but_icmpv6_quote_is_not_udp():
+    from scytaledroid.DynamicAnalysis.pcap.enrichment import flow_key, parse_packet_metadata_line
+
+    fields = [
+        "1",
+        "90",
+        "",
+        "",
+        "",
+        "",
+        "53000",
+        "53",
+        "",
+        "",
+        "",
+        "",
+        "eth:ipv6:udp:dns",
+        "2001:db8::1",
+        "2001:db8::2",
+    ]
+    packet = parse_packet_metadata_line("\t".join(fields))
+    assert packet.src_ip == "2001:db8::1" and packet.dst_ip == "2001:db8::2"
+    assert packet.transport == "udp" and flow_key(packet) is not None
+    fields[12] = "eth:ipv6:icmpv6:ipv6:udp:dns"
+    fields[13] = "2001:db8::2,2001:db8::1"
+    fields[14] = "2001:db8::1,2001:db8::2"
+    packet = parse_packet_metadata_line("\t".join(fields))
+    assert packet.transport == "icmpv6" and flow_key(packet) is None
+    assert packet.src_ip == "2001:db8::2"
+
+
+def test_ip_tunnel_is_not_assigned_mixed_layer_transport_endpoints():
+    from scytaledroid.DynamicAnalysis.pcap.enrichment import flow_key, parse_packet_metadata_line
+
+    fields = [
+        "1",
+        "90",
+        "192.0.2.1,10.0.0.1",
+        "192.0.2.2,10.0.0.2",
+        "52000",
+        "443",
+        "",
+        "",
+        "1",
+        "1",
+        "example.test",
+        "h2",
+        "eth:ip:ip:tcp:tls",
+    ]
+    packet = parse_packet_metadata_line("\t".join(fields))
+    assert packet.transport == "unknown" and flow_key(packet) is None
+    assert packet.tls_sni is None and packet.tls_handshake_type is None

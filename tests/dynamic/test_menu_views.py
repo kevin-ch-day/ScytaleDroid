@@ -8,22 +8,13 @@ from scytaledroid.DynamicAnalysis.menus import menu_overview as menu_views
 def test_build_dynamic_menu_sections_uses_active_research_cohort_label(monkeypatch) -> None:
     sections = menu_views.build_dynamic_menu_sections()
 
-    assert sections.primary_actions[0].key == "1"
-    assert sections.primary_actions[0].label == "Single app run"
-    assert sections.primary_actions[1].key == "2"
-    assert sections.primary_actions[1].label == "Current-build collection queue"
-    assert sections.primary_actions[2].key == "3"
-    assert sections.primary_actions[2].label == "Paper-freeze readiness"
-    assert sections.validation[0].key == "4"
-    assert sections.validation[0].label == "Verify capture environment"
-    assert sections.validation[1].key == "5"
-    assert sections.validation[1].label == "State summary"
-    assert sections.validation[2].key == "6"
-    assert sections.validation[2].label == "Archive readiness"
-    assert sections.validation[3].key == "7"
-    assert sections.validation[3].label == "Change cohort"
-    assert sections.maintenance[0].key == "8"
-    assert sections.maintenance[0].label == "Maintenance / Advanced"
+    assert [(o.key, o.label) for o in sections.primary_actions] == [
+        ("1", "Run an app"),
+        ("2", "Continue collection (guided research)"),
+        ("9", "Recent runs"),
+    ]
+    assert [o.key for o in sections.validation] == ["7", "3", "5", "6"]
+    assert [o.key for o in sections.maintenance] == ["4", "8"]
 
 
 def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus(
@@ -71,7 +62,7 @@ def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus
         lambda: {"quota_runs_counted": 1, "extra_eligible_runs": 0},
     )
 
-    menu_views.render_dynamic_menu_overview()
+    menu_views.render_research_menu_overview()
 
     out = capsys.readouterr().out
     assert "Research Dataset Beta" in out
@@ -123,7 +114,7 @@ def test_render_dynamic_menu_overview_surfaces_retained_extra_valid_runs(
         lambda: {"quota_runs_counted": 15, "extra_eligible_runs": 3},
     )
 
-    menu_views.render_dynamic_menu_overview()
+    menu_views.render_research_menu_overview()
 
     out = capsys.readouterr().out
     assert "Evidence" in out

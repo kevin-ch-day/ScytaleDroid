@@ -214,29 +214,49 @@ def test_persist_run_summary_populates_canonical_tables():
         pytest.skip("Persistence did not yield a run_id; skipping integration assertions.")
 
     assert outcome.success
-    run_id = outcome.run_id
-
-    assert _scalar("SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp=%s", (session_stamp,)) == 1
-    assert _scalar(
-        """
+    assert (
+        _scalar(
+            "SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp=%s", (session_stamp,)
+        )
+        == 1
+    )
+    assert (
+        _scalar(
+            """
         SELECT COUNT(*)
         FROM static_findings f
         JOIN static_findings_summary s ON s.id = f.summary_id
         WHERE s.session_stamp = %s
         """,
-        (session_stamp,),
-    ) > 0
-    assert _scalar("SELECT COUNT(*) FROM static_string_summary WHERE session_stamp=%s", (session_stamp,)) == 1
-    assert _scalar(
-        """
+            (session_stamp,),
+        )
+        > 0
+    )
+    assert (
+        _scalar(
+            "SELECT COUNT(*) FROM static_string_summary WHERE session_stamp=%s", (session_stamp,)
+        )
+        == 1
+    )
+    assert (
+        _scalar(
+            """
         SELECT COUNT(*)
         FROM static_string_samples x
         JOIN static_string_summary s ON s.id = x.summary_id
         WHERE s.session_stamp = %s
         """,
-        (session_stamp,),
-    ) == outcome.string_samples_persisted
-    assert _scalar("SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key=%s", (f"perm-audit:app:{session_stamp}",)) >= 0
+            (session_stamp,),
+        )
+        == outcome.string_samples_persisted
+    )
+    assert (
+        _scalar(
+            "SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key=%s",
+            (f"perm-audit:app:{session_stamp}",),
+        )
+        >= 0
+    )
     assert _scalar("SELECT COUNT(*) FROM permission_audit_apps", ()) >= 0
 
     risk_row = core_q.run_sql(
@@ -308,7 +328,10 @@ def test_run_manifest_includes_manifest_evidence(tmp_path):
     string_data = {"counts": {"high_entropy": 1}, "samples": {}}
     baseline_payload = {
         "app": {"package": package, "session_stamp": session_stamp, "scope_label": scope_label},
-        "baseline": {"findings": [], "string_analysis": {"counts": {"endpoints": 0}, "samples": {}}},
+        "baseline": {
+            "findings": [],
+            "string_analysis": {"counts": {"endpoints": 0}, "samples": {}},
+        },
     }
     finding_totals = {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
 

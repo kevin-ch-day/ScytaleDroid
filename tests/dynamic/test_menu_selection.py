@@ -45,7 +45,9 @@ class _CfgFourInteractive:
 @pytest.fixture(autouse=True)
 def _wide_queue_layout(monkeypatch) -> None:
     monkeypatch.setattr(menu_selection.terminal, "get_terminal_width", lambda *args, **kwargs: 140)
-    monkeypatch.setattr(menu_selection._app_queue_rendering, "_paper_cutoff_summary_label", lambda: "")
+    monkeypatch.setattr(
+        menu_selection._app_queue_rendering, "_paper_cutoff_summary_label", lambda: ""
+    )
 
 
 def test_queue_table_marks_next_recommended_row(monkeypatch) -> None:
@@ -261,7 +263,12 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(
         "render_table",
         lambda headers, rendered, **_k: captured.update({"headers": headers, "rows": rendered}),
     )
-    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: "b")
+    monkeypatch.setattr(
+        menu_selection._status_reports, "render_cohort_status_details", lambda **kw: None
+    )
+    choices = iter(["s", "a", "b"])
+    monkeypatch.setattr(menu_selection, "choose_package_selection", lambda prepared: None)
+    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: next(choices))
 
     result = menu_selection.run_package_selection_menu(
         prepared,
@@ -378,7 +385,11 @@ def test_run_package_selection_menu_surfaces_paper_cutoff_summary(monkeypatch, c
     )
     monkeypatch.setattr(menu_selection.menu_utils, "print_header", lambda *_a, **_k: None)
     monkeypatch.setattr(menu_selection.table_utils, "render_table", lambda *_a, **_k: None)
-    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: "b")
+    monkeypatch.setattr(
+        menu_selection._status_reports, "render_cohort_status_details", lambda **kw: None
+    )
+    choices = iter(["s", "b"])
+    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: next(choices))
     monkeypatch.setattr(
         menu_selection._app_queue_rendering,
         "_paper_cutoff_summary_label",
@@ -1441,7 +1452,17 @@ def test_compact_queue_table_uses_standard_layout_at_80_columns(monkeypatch) -> 
     )
 
     assert captured["headers"] == _QUEUE_TABLE_HEADERS_STANDARD
-    assert captured["rows"][0] == ["2", "CNN", "review", "invalid", "current", "3/3", "0", "0/2", "0"]
+    assert captured["rows"][0] == [
+        "2",
+        "CNN",
+        "review",
+        "invalid",
+        "current",
+        "3/3",
+        "0",
+        "0/2",
+        "0",
+    ]
     assert captured["rows"][1] == [
         "3",
         "Facebook",
@@ -1566,7 +1587,11 @@ def test_run_package_selection_menu_shows_current_build_refresh_summary(
     )
     monkeypatch.setattr(menu_selection.menu_utils, "print_header", lambda *_a, **_k: None)
     monkeypatch.setattr(menu_selection.table_utils, "render_table", lambda *_a, **_k: None)
-    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: "b")
+    monkeypatch.setattr(
+        menu_selection._status_reports, "render_cohort_status_details", lambda **kw: None
+    )
+    choices = iter(["s", "b"])
+    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: next(choices))
 
     result = menu_selection.run_package_selection_menu(
         prepared,
@@ -1654,7 +1679,11 @@ def test_run_package_selection_menu_guides_non_drift_capture_before_redoing_drif
     )
     monkeypatch.setattr(menu_selection.menu_utils, "print_header", lambda *_a, **_k: None)
     monkeypatch.setattr(menu_selection.table_utils, "render_table", lambda *_a, **_k: None)
-    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: "b")
+    monkeypatch.setattr(
+        menu_selection._status_reports, "render_cohort_status_details", lambda **kw: None
+    )
+    choices = iter(["s", "b"])
+    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: next(choices))
 
     result = menu_selection.run_package_selection_menu(
         prepared,
@@ -1733,8 +1762,12 @@ def test_resolve_live_build_drift_map_caches_repeated_package_set(monkeypatch) -
     monkeypatch.setattr(queue_data_sources, "load_plan_candidates", _plans)
     monkeypatch.setattr(queue_data_sources, "read_observed_version_code_details", _observed)
 
-    first = queue_data_sources.resolve_live_build_drift_map(["com.example.app"], device_serial="ZY22")
-    second = queue_data_sources.resolve_live_build_drift_map(["com.example.app"], device_serial="ZY22")
+    first = queue_data_sources.resolve_live_build_drift_map(
+        ["com.example.app"], device_serial="ZY22"
+    )
+    second = queue_data_sources.resolve_live_build_drift_map(
+        ["com.example.app"], device_serial="ZY22"
+    )
 
     assert first == second
     assert calls == {"plans": 1, "adb": 1}
@@ -1763,9 +1796,13 @@ def test_resolve_live_build_drift_map_returns_cache_copy(monkeypatch) -> None:
         lambda *_args, **_kwargs: {"version_code": "200"},
     )
 
-    first = queue_data_sources.resolve_live_build_drift_map(["com.example.app"], device_serial="ZY22")
+    first = queue_data_sources.resolve_live_build_drift_map(
+        ["com.example.app"], device_serial="ZY22"
+    )
     first["com.example.app"]["observed_version_code"] = "mutated"
-    second = queue_data_sources.resolve_live_build_drift_map(["com.example.app"], device_serial="ZY22")
+    second = queue_data_sources.resolve_live_build_drift_map(
+        ["com.example.app"], device_serial="ZY22"
+    )
 
     assert second["com.example.app"]["observed_version_code"] == "200"
 
@@ -1810,12 +1847,8 @@ def test_resolve_db_dynamic_lineage_context_map_caches_repeated_package_set(monk
         fake_resolve_active_package_identity,
     )
 
-    first = queue_data_sources.resolve_db_dynamic_lineage_context_map(
-        ["com.instagram.android"]
-    )
-    second = queue_data_sources.resolve_db_dynamic_lineage_context_map(
-        ["com.instagram.android"]
-    )
+    first = queue_data_sources.resolve_db_dynamic_lineage_context_map(["com.instagram.android"])
+    second = queue_data_sources.resolve_db_dynamic_lineage_context_map(["com.instagram.android"])
 
     assert first == second
     assert first["com.instagram.android"]["db_active_sessions"] == 3
@@ -1849,13 +1882,9 @@ def test_resolve_db_dynamic_lineage_context_map_returns_cache_copy(monkeypatch) 
         lambda _package_name: ("100", "abc123"),
     )
 
-    first = queue_data_sources.resolve_db_dynamic_lineage_context_map(
-        ["com.instagram.android"]
-    )
+    first = queue_data_sources.resolve_db_dynamic_lineage_context_map(["com.instagram.android"])
     first["com.instagram.android"]["db_active_sessions"] = 999
-    second = queue_data_sources.resolve_db_dynamic_lineage_context_map(
-        ["com.instagram.android"]
-    )
+    second = queue_data_sources.resolve_db_dynamic_lineage_context_map(["com.instagram.android"])
 
     assert second["com.instagram.android"]["db_active_sessions"] == 3
 
@@ -1966,22 +1995,24 @@ def _build_active_qa_row(
             "current" if active_runs or not legacy_valid else "legacy"
         ),
         next_action_from_need_fn=lambda need: need,
-        build_scoped_dataset_counts_fn=lambda _package, _runs, cfg: {
-            "baseline_countable": 3,
-            "baseline_extra": 0,
-            "baseline_not_idle_supplemental": 0,
-            "baseline_low_signal_supplemental": 0,
-            "interactive_countable": 4,
-            "interactive_extra": 0,
-            "interactive_low_signal_supplemental": 0,
-            "legacy_valid": 17,
-            "legacy_builds": 2,
-            "legacy_pcap_available": 17,
-            "active_version_code": "262607310",
-            "active_base_sha": "active-sha",
-            "technical_valid_active": 7,
-        }
-        | scoped,
+        build_scoped_dataset_counts_fn=lambda _package, _runs, cfg: (
+            {
+                "baseline_countable": 3,
+                "baseline_extra": 0,
+                "baseline_not_idle_supplemental": 0,
+                "baseline_low_signal_supplemental": 0,
+                "interactive_countable": 4,
+                "interactive_extra": 0,
+                "interactive_low_signal_supplemental": 0,
+                "legacy_valid": 17,
+                "legacy_builds": 2,
+                "legacy_pcap_available": 17,
+                "active_version_code": "262607310",
+                "active_base_sha": "active-sha",
+                "technical_valid_active": 7,
+            }
+            | scoped
+        ),
         resolve_tracker_run_identity_fn=lambda _package, run: (
             str(run.get("version_code") or "") or None,
             str(run.get("base_sha256") or "") or None,

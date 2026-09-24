@@ -99,6 +99,8 @@ def _marker_started_at_epoch(payload: dict[str, Any]) -> float | None:
 
 def _active_in_progress_marker(marker_path: Path) -> bool:
     payload = _load_json(marker_path)
+    if payload.get("state") == "startup_failed":
+        return False
     host_pid = payload.get("host_pid")
     if isinstance(host_pid, int) and host_pid > 0:
         return _process_is_alive(host_pid)
@@ -120,7 +122,9 @@ def dataset_tracker_counts(package_name: str) -> PackageRunCounts:
     total = len(runs) if isinstance(runs, list) else 0
     valid = int(entry.get("valid_runs") or 0) if isinstance(entry, dict) else 0
     baseline_valid = int(entry.get("baseline_valid_runs") or 0) if isinstance(entry, dict) else 0
-    interactive_valid = int(entry.get("interactive_valid_runs") or 0) if isinstance(entry, dict) else 0
+    interactive_valid = (
+        int(entry.get("interactive_valid_runs") or 0) if isinstance(entry, dict) else 0
+    )
     quota_met = bool(entry.get("quota_met")) if isinstance(entry, dict) else False
     extra_valid = int(entry.get("extra_valid_runs") or 0) if isinstance(entry, dict) else 0
     baseline_not_idle = sum(

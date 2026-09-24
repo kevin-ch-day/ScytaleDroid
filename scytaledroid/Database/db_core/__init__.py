@@ -7,6 +7,7 @@ from .db_engine import (
     ParamStyleError,
     TransientDbError,
     connect,
+    detect_placeholder_style,
     sanity_probe,
 )
 from .db_queries import run_sql, run_sql_many
@@ -20,6 +21,7 @@ __all__ = [
     "TransientDbError",
     "connect",
     "database_session",
+    "detect_placeholder_style",
     "run_sql",
     "run_sql_many",
     "sanity_probe",

@@ -62,13 +62,21 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
     assert "Motorola" in out and "Android 15" in out and "Physical" in out and "NON-ROOT" in out
     assert "Inv" in out and "Har" in out and "Ev" in out
     assert "546 pkgs" in out and "14 hrs 39 mins ago" in out
-    assert "Inv FRESH" in out and "harvest-ready" in out
+    assert "Inv  FRESH" in out and "harvest-ready" in out
     # Compact pipeline strip: word labels (operator-readable) vs legacy "117 hv" tokens
     assert "117" in out and "411" in out and "18" in out
     assert "pullable" in out and "policy-blocked" in out and "scope-blocked" in out
-    assert "117 resolved" in out
+    assert "117 resolved · 117 pullable · 411 policy-blocked · 18 scope-blocked" in out
     assert "Harvest 117" not in out
-    assert "aligned to 26" in out
+    assert "aligned to snapshot 26" in out
+    assert " │ " not in out
+    inv_line = next(line for line in out.splitlines() if line.startswith("Inv  "))
+    har_line = next(line for line in out.splitlines() if line.startswith("Har  "))
+    ev_line = next(line for line in out.splitlines() if line.startswith("Ev   "))
+    assert "FRESH" in inv_line and "546 pkgs" in inv_line
+    assert "117 resolved" in har_line and "Har" in har_line
+    assert "aligned to snapshot 26" in ev_line
+    assert "Inv" in inv_line and "Har" not in inv_line
     assert "Next: static analysis (menu 2)" in out
     assert "Device Capability" not in out
     assert "Pipeline State" not in out
@@ -89,7 +97,12 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
 
 
 def test_print_dashboard_hint_when_active_but_no_adb_rows(capsys) -> None:
-    active = {"serial": "ZY22JK89DR", "model": "test", "manufacturer": "ACME", "android_release": "15"}
+    active = {
+        "serial": "ZY22JK89DR",
+        "model": "test",
+        "manufacturer": "ACME",
+        "android_release": "15",
+    }
     dashboard.print_dashboard(
         summaries=[],
         active_details=active,
@@ -222,11 +235,13 @@ def test_dashboard_next_step_explains_inventory_harvest_misalignment(monkeypatch
     )
 
     out = colors.strip(capsys.readouterr().out)
-    assert "harvest 30 vs inventory 31" in out
+    assert "harvest snapshot 30 vs inventory 31" in out
     assert "Next: run harvest (2) to match latest inventory." in out
 
 
-def test_dashboard_compact_status_marks_aligned_drifted_harvest_for_review(monkeypatch, capsys) -> None:
+def test_dashboard_compact_status_marks_aligned_drifted_harvest_for_review(
+    monkeypatch, capsys
+) -> None:
     active = {
         "serial": "ZY22JK89DR",
         "model": "moto g 5G - 2024",
@@ -276,8 +291,11 @@ def test_dashboard_compact_status_marks_aligned_drifted_harvest_for_review(monke
     )
 
     out = colors.strip(capsys.readouterr().out)
-    assert "aligned to 31 but latest harvest needs review (1 drifted package(s))" in out
-    assert "Next: review latest harvest drift/issues, then refresh inventory or re-harvest as needed." in out
+    assert "aligned to snapshot 31 but latest harvest needs review (1 drifted package(s))" in out
+    assert (
+        "Next: review latest harvest drift/issues, then refresh inventory or re-harvest as needed."
+        in out
+    )
 
 
 def test_latest_harvest_overview_groups_package_manifests_by_session_and_ignores_policy_blocks(
@@ -324,7 +342,9 @@ def test_latest_harvest_overview_groups_package_manifests_by_session_and_ignores
     assert overview["session_note"] is None
 
 
-def test_dashboard_compact_status_uses_operator_friendly_full_refresh_label(monkeypatch, capsys) -> None:
+def test_dashboard_compact_status_uses_operator_friendly_full_refresh_label(
+    monkeypatch, capsys
+) -> None:
     active = {
         "serial": "ZY22JK89DR",
         "model": "moto g 5G - 2024",
@@ -374,7 +394,7 @@ def test_dashboard_compact_status_uses_operator_friendly_full_refresh_label(monk
     out = colors.strip(capsys.readouterr().out)
     assert "full device" in out
     assert "baseline-full" not in out
-    assert "aligned to 60" in out
+    assert "aligned to snapshot 60" in out
     assert "1 resolved" in out
 
 

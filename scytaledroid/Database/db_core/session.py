@@ -34,12 +34,19 @@ def get_current_engine() -> DatabaseEngine | None:
             return engine
     except Exception:
         pass
+    usable = False
+    try:
+        usable = bool(engine.connection_is_usable())
+    except Exception:
+        usable = False
+    if usable:
+        return engine
     try:
         engine.reconnect()
     except Exception:
-        # Drop unusable engine so callers can establish a fresh session.
-        close_engine()
-        return None
+        # Leave the session-bound engine in place. close_engine() would zero
+        # nesting depth while callers still hold database_session().
+        return engine
     return engine
 
 

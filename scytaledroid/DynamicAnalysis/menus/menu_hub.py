@@ -76,8 +76,12 @@ def _run_maintenance_advanced_menu(callbacks: DynamicAnalysisMenuCallbacks) -> N
     while True:
         print()
         menu_utils.print_header("Maintenance / Advanced")
-        menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
-        choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
+        menu_utils.print_menu(
+            options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True
+        )
+        choice = prompt_utils.get_choice(
+            menu_utils.selectable_keys(options, include_exit=True), default="0"
+        )
 
         if choice == "0":
             return
@@ -122,10 +126,15 @@ def run_dynamic_analysis_menu(callbacks: DynamicAnalysisMenuCallbacks) -> None:
         callbacks.warn_if_code_changed()
         render_dynamic_menu_overview()
         print()
-        menu_utils.print_section("Actions")
-        menu_utils.print_menu(
-            options, show_exit=False, show_descriptions=False, compact=True
-        )
+        for title, keys in (
+            ("Run / Collection", {"1", "2", "9"}),
+            ("Research", {"3", "5", "6", "7"}),
+            ("Advanced", {"4", "8"}),
+        ):
+            items = [option for option in options if option.key in keys]
+            if items:
+                menu_utils.print_section(title)
+                menu_utils.print_menu(items, show_exit=False, show_descriptions=False, compact=True)
         menu_utils.print_menu(
             [], show_exit=True, exit_label="Back", show_descriptions=False, compact=True
         )
@@ -167,6 +176,11 @@ def run_dynamic_analysis_menu(callbacks: DynamicAnalysisMenuCallbacks) -> None:
         if choice == "7":
             callbacks.choose_active_research_cohort()
             _pause_if_verbose()
+            continue
+        if choice == "9":
+            from scytaledroid.DynamicAnalysis.menus.capture_summary import show_recent_runs
+
+            show_recent_runs()
             continue
         if choice == "8":
             _run_maintenance_advanced_menu(callbacks)

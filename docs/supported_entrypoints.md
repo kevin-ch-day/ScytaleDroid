@@ -43,6 +43,8 @@ operator conveniences rather than application-owned logic:
 - `scripts/static_analysis/repair_archive_report_lineage.py` (dry-run-first, backup-and-receipt repair for missing archive/latest-mirror lineage; never changes analytical payloads)
 - `scripts/operator/report_system_migration_readiness.py` (read-only workspace, DB, corpus, and paper-freeze transfer preflight)
 
+- `scripts/dynamic/verify_pilot.py` (read-only, externally pinned eight-sample pre-execution packet verification; see `docs/maintenance/pilot_preflight.md`)
+
 ## Not supported (best-effort)
 
 - Any `scripts/` implementation detail that is not listed above.

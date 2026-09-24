@@ -40,6 +40,32 @@ def _env_value(root: str, suffix: str) -> str | None:
     return os.environ.get(_env_key(root, suffix))
 
 
+def _reject_control_chars(label: str, value: str) -> None:
+    if any(ch in value for ch in ("\n", "\r", "\x00")):
+        raise RuntimeError(f"{label} contains an invalid control character.")
+
+
+def _database_name_from_url_path(path: str | None) -> str:
+    """Return the schema name from a mysql/mariadb URL path.
+
+    Trailing slashes and extra path segments are ignored so
+    ``.../dbname/`` does not become a literal ``dbname/`` catalog.
+    """
+
+    name = (path or "").lstrip("/")
+    name = name.split("?", 1)[0].rstrip("/")
+    if not name:
+        return ""
+    return name.split("/", 1)[0]
+
+
+def _validate_resolved_mysql_fields(label: str, parsed) -> None:
+    _reject_control_chars(f"{label} host", parsed.hostname or "")
+    _reject_control_chars(f"{label} user", unquote(parsed.username or ""))
+    _reject_control_chars(f"{label} password", unquote(parsed.password or ""))
+    _reject_control_chars(f"{label} database", _database_name_from_url_path(parsed.path))
+
+
 def _validate_db_parts(root: str = _PRIMARY_DB_ROOT) -> None:
     name = _env_value(root, "NAME")
     if not name:
@@ -108,6 +134,7 @@ def resolve_db_config_from_root(root: str) -> tuple[dict[str, str | int] | None,
         )
 
     if scheme in {"mysql", "mariadb"}:
+        _validate_resolved_mysql_fields(_env_key(root, "URL"), parsed)
         try:
             connect_timeout = int((_env_value(root, "CONNECT_TIMEOUT") or "5").strip())
         except Exception:
@@ -120,11 +147,7 @@ def resolve_db_config_from_root(root: str) -> tuple[dict[str, str | int] | None,
             write_timeout = int((_env_value(root, "WRITE_TIMEOUT") or "120").strip())
         except Exception:
             write_timeout = 120
-        source = (
-            f"env:{_env_key(root, 'URL')}"
-            if _env_value(root, "URL")
-            else f"env:{root}_*"
-        )
+        source = f"env:{_env_key(root, 'URL')}" if _env_value(root, "URL") else f"env:{root}_*"
         return (
             {
                 "engine": "mysql",
@@ -132,7 +155,7 @@ def resolve_db_config_from_root(root: str) -> tuple[dict[str, str | int] | None,
                 "port": int(parsed.port or 3306),
                 "user": unquote(parsed.username or ""),
                 "password": unquote(parsed.password or ""),
-                "database": (parsed.path or "").lstrip("/") or "",
+                "database": _database_name_from_url_path(parsed.path),
                 "charset": "utf8mb4",
                 "connect_timeout": max(1, connect_timeout),
                 "read_timeout": max(5, read_timeout),
@@ -186,8 +209,11 @@ def _load_from_env() -> dict[str, str | int]:
         )
 
     if scheme in {"mysql", "mariadb"}:
+        _validate_resolved_mysql_fields("SCYTALEDROID_DB_URL", parsed)
         try:
-            connect_timeout = int((os.environ.get("SCYTALEDROID_DB_CONNECT_TIMEOUT") or "5").strip())
+            connect_timeout = int(
+                (os.environ.get("SCYTALEDROID_DB_CONNECT_TIMEOUT") or "5").strip()
+            )
         except Exception:
             connect_timeout = 5
         try:
@@ -204,7 +230,7 @@ def _load_from_env() -> dict[str, str | int]:
             "port": int(parsed.port or 3306),
             "user": unquote(parsed.username or ""),
             "password": unquote(parsed.password or ""),
-            "database": (parsed.path or "").lstrip("/") or "",
+            "database": _database_name_from_url_path(parsed.path),
             "charset": "utf8mb4",
             "connect_timeout": max(1, connect_timeout),
             "read_timeout": max(5, read_timeout),
@@ -221,7 +247,11 @@ else:
     DB_CONFIG_SOURCE = (
         f"env:{_env_key(_PRIMARY_DB_ROOT, 'URL')}"
         if os.environ.get(_env_key(_PRIMARY_DB_ROOT, "URL"))
-        else (f"env:{_PRIMARY_DB_ROOT}_*" if os.environ.get(_env_key(_PRIMARY_DB_ROOT, "NAME")) else "default-sqlite")
+        else (
+            f"env:{_PRIMARY_DB_ROOT}_*"
+            if os.environ.get(_env_key(_PRIMARY_DB_ROOT, "NAME"))
+            else "default-sqlite"
+        )
     )
 
 _DEFAULT_DATABASE = DB_CONFIG.get("database", "")
@@ -250,6 +280,7 @@ def db_enabled() -> bool:
     """Return True when the DB backend is enabled (MySQL/MariaDB)."""
 
     return str(DB_CONFIG.get("engine", "")).lower() in {"mysql", "mariadb"}
+
 
 def is_test_env() -> bool:
     """Return True when running under pytest/unit tests.

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from scytaledroid.DeviceAnalysis.apk_label import parse_application_label
-from scytaledroid.DeviceAnalysis.apk_signing import extract_apk_cert_sha256, parse_apksigner_cert_sha256
+from scytaledroid.DeviceAnalysis.apk_signing import (
+    extract_apk_cert_sha256,
+    parse_apksigner_cert_sha256,
+)
 
 
 def test_parse_apksigner_prefers_numbered_signer_one() -> None:
@@ -53,4 +56,9 @@ application-label:'Example'
 application-label-en:'Example EN'
 """
     assert parse_application_label(text, package_name="com.example.app") == "Example"
-    assert parse_application_label("application-label:'com.example.app'", package_name="com.example.app") is None
+    assert (
+        parse_application_label(
+            "application-label:'com.example.app'", package_name="com.example.app"
+        )
+        is None
+    )

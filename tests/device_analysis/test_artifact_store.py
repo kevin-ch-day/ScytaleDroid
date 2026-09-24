@@ -91,7 +91,10 @@ def test_repo_relative_path_keeps_canonical_store_logical_when_symlinked(
     local_apk_root.parent.mkdir(parents=True)
     local_apk_root.symlink_to(external)
 
-    assert artifact_store.repo_relative_path(canonical) == f"data/store/apk/sha256/{digest[:2]}/{digest}.apk"
+    assert (
+        artifact_store.repo_relative_path(canonical)
+        == f"data/store/apk/sha256/{digest[:2]}/{digest}.apk"
+    )
 
 
 def test_repo_relative_path_maps_absolute_mercury_cold_blob_to_logical_path(
@@ -104,9 +107,23 @@ def test_repo_relative_path_maps_absolute_mercury_cold_blob_to_logical_path(
     monkeypatch.setattr(artifact_store, "EXTERNAL_APK_STORE_MOUNT_ROOTS", (external_mount,))
 
     digest = "1" * 64
-    cold_blob = external_mount / "scytaledroid_artifacts" / "apk_store" / "cold" / "data" / "store" / "apk" / "sha256" / digest[:2] / f"{digest}.apk"
+    cold_blob = (
+        external_mount
+        / "scytaledroid_artifacts"
+        / "apk_store"
+        / "cold"
+        / "data"
+        / "store"
+        / "apk"
+        / "sha256"
+        / digest[:2]
+        / f"{digest}.apk"
+    )
 
-    assert artifact_store.repo_relative_path(cold_blob) == f"data/store/apk/sha256/{digest[:2]}/{digest}.apk"
+    assert (
+        artifact_store.repo_relative_path(cold_blob)
+        == f"data/store/apk/sha256/{digest[:2]}/{digest}.apk"
+    )
 
 
 def test_materialize_apk_refuses_unmounted_external_symlink(
@@ -126,7 +143,10 @@ def test_materialize_apk_refuses_unmounted_external_symlink(
     monkeypatch.setattr(artifact_store, "EXTERNAL_APK_STORE_MOUNT_ROOTS", (external_mount,))
     monkeypatch.setattr(artifact_store.os.path, "ismount", lambda _path: False)
 
-    with pytest.raises(artifact_store.ExternalApkStoreUnavailable, match="External APK store is configured but not mounted"):
+    with pytest.raises(
+        artifact_store.ExternalApkStoreUnavailable,
+        match="External APK store is configured but not mounted",
+    ):
         artifact_store.materialize_apk(source, sha256_digest="d" * 64)
 
 
@@ -138,7 +158,9 @@ def test_materialize_apk_refuses_broken_cold_blob_symlink(
     monkeypatch.setattr(app_config, "DATA_DIR", "data")
     external_mount = tmp_path / "mnt" / "MERCURY_DATA_V2"
     digest = "e" * 64
-    cold_target = external_mount / "cold" / "data" / "store" / "apk" / "sha256" / digest[:2] / f"{digest}.apk"
+    cold_target = (
+        external_mount / "cold" / "data" / "store" / "apk" / "sha256" / digest[:2] / f"{digest}.apk"
+    )
     local_blob = artifact_store.canonical_apk_path(digest)
     local_blob.parent.mkdir(parents=True)
     local_blob.symlink_to(cold_target)
@@ -146,9 +168,13 @@ def test_materialize_apk_refuses_broken_cold_blob_symlink(
     source.write_bytes(b"apk")
 
     monkeypatch.setattr(artifact_store, "EXTERNAL_APK_STORE_MOUNT_ROOTS", (external_mount,))
-    monkeypatch.setattr(artifact_store.os.path, "ismount", lambda path: Path(path) == external_mount)
+    monkeypatch.setattr(
+        artifact_store.os.path, "ismount", lambda path: Path(path) == external_mount
+    )
 
-    with pytest.raises(artifact_store.ColdApkBlobUnavailable, match="canonical APK symlink target is missing"):
+    with pytest.raises(
+        artifact_store.ColdApkBlobUnavailable, match="canonical APK symlink target is missing"
+    ):
         artifact_store.materialize_apk(source, sha256_digest=digest)
 
 
@@ -160,7 +186,9 @@ def test_materialize_apk_reuses_available_cold_blob_symlink(
     monkeypatch.setattr(app_config, "DATA_DIR", "data")
     external_mount = tmp_path / "mnt" / "MERCURY_DATA_V2"
     digest = "f" * 64
-    cold_target = external_mount / "cold" / "data" / "store" / "apk" / "sha256" / digest[:2] / f"{digest}.apk"
+    cold_target = (
+        external_mount / "cold" / "data" / "store" / "apk" / "sha256" / digest[:2] / f"{digest}.apk"
+    )
     cold_target.parent.mkdir(parents=True)
     cold_target.write_bytes(b"cold")
     local_blob = artifact_store.canonical_apk_path(digest)
@@ -170,18 +198,46 @@ def test_materialize_apk_reuses_available_cold_blob_symlink(
     source.write_bytes(b"new-copy")
 
     monkeypatch.setattr(artifact_store, "EXTERNAL_APK_STORE_MOUNT_ROOTS", (external_mount,))
-    monkeypatch.setattr(artifact_store.os.path, "ismount", lambda path: Path(path) == external_mount)
+    monkeypatch.setattr(
+        artifact_store.os.path, "ismount", lambda path: Path(path) == external_mount
+    )
 
     resolved = artifact_store.materialize_apk(source, sha256_digest=digest, move=True)
 
     assert resolved == local_blob
-    assert artifact_store.repo_relative_path(resolved) == f"data/store/apk/sha256/{digest[:2]}/{digest}.apk"
+    assert (
+        artifact_store.repo_relative_path(resolved)
+        == f"data/store/apk/sha256/{digest[:2]}/{digest}.apk"
+    )
     assert cold_target.read_bytes() == b"cold"
     assert not source.exists()
 
 
+def test_materialize_apk_refuses_empty_existing_destination_without_deleting_source(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+
+    digest = "0" * 64
+    stored = artifact_store.canonical_apk_path(digest)
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.write_bytes(b"")
+    source = tmp_path / "keep-me.apk"
+    source.write_bytes(b"session-copy")
+
+    with pytest.raises(OSError, match="empty"):
+        artifact_store.materialize_apk(source, sha256_digest=digest, move=True)
+
+    assert source.exists()
+    assert source.read_bytes() == b"session-copy"
+
+
 def test_external_apk_mount_roots_accept_new_host_configuration(monkeypatch) -> None:
-    monkeypatch.setenv("SCYTALEDROID_EXTERNAL_APK_STORE_MOUNT_ROOTS", "/mnt/new-cold:/mnt/secondary-cold")
+    monkeypatch.setenv(
+        "SCYTALEDROID_EXTERNAL_APK_STORE_MOUNT_ROOTS", "/mnt/new-cold:/mnt/secondary-cold"
+    )
 
     roots = artifact_store._configured_external_apk_store_mount_roots()  # noqa: SLF001 - config contract
 

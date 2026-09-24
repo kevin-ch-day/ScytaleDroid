@@ -37,7 +37,9 @@ def run_dynamic_session(
     observer_ids = set(config.observer_ids or ("system_log_capture",))
     observers = []
     if "pcapdroid_capture" in observer_ids:
-        observers.append(PcapdroidCaptureObserver(api_key=getattr(config, "pcapdroid_api_key", None)))
+        observers.append(
+            PcapdroidCaptureObserver(api_key=getattr(config, "pcapdroid_api_key", None))
+        )
     if "system_log_capture" in observer_ids:
         observers.append(SystemLogObserver())
 
@@ -46,7 +48,9 @@ def run_dynamic_session(
         manifest, run_dir, telemetry_payload = orchestrator.run()
     except PlanValidationError as exc:
         result.status = "blocked"
-        result.errors = list(exc.outcome.reasons) if exc.outcome.reasons else ["dynamic plan validation failed"]
+        result.errors = (
+            list(exc.outcome.reasons) if exc.outcome.reasons else ["dynamic plan validation failed"]
+        )
         result.notes = "Dynamic execution blocked by plan validation."
         result.ended_at = datetime.now(UTC)
         logger.warning(
@@ -62,6 +66,10 @@ def run_dynamic_session(
     result.notes = f"Dynamic run captured at {run_dir}."
     result.dynamic_run_id = manifest.dynamic_run_id
     result.evidence_path = str(run_dir)
+    if telemetry_payload.get("startup_failure"):
+        result.startup_failure = dict(telemetry_payload["startup_failure"])
+        result.errors = [str(result.startup_failure["error"])]
+        result.notes = "Dynamic run could not start; diagnostic evidence preserved where writable."
     if telemetry_payload:
         result.telemetry_process = list(telemetry_payload.get("telemetry_process") or [])
         result.telemetry_network = list(telemetry_payload.get("telemetry_network") or [])

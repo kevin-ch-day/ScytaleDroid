@@ -64,7 +64,9 @@ class V3MlDeriveResult:
     errors: tuple[str, ...]
 
 
-def _rows_to_matrix_v3(rows: list[dict[str, Any]], *, window_spec: WindowSpec) -> tuple[np.ndarray, list[str]]:
+def _rows_to_matrix_v3(
+    rows: list[dict[str, Any]], *, window_spec: WindowSpec
+) -> tuple[np.ndarray, list[str]]:
     """Feature matrix for Profile v3 per-window scoring."""
 
     return rows_to_basic_matrix(
@@ -74,12 +76,16 @@ def _rows_to_matrix_v3(rows: list[dict[str, Any]], *, window_spec: WindowSpec) -
     )
 
 
-def _find_latest_runs_for_package(*, evidence_root: Path, package: str) -> tuple[str | None, str | None]:
+def _find_latest_runs_for_package(
+    *, evidence_root: Path, package: str
+) -> tuple[str | None, str | None]:
     """Return (latest_baseline_run_id, latest_scripted_run_id) by ended_at timestamp."""
 
     latest_baseline: tuple[str, str] | None = None  # (ended_at, run_id)
     latest_scripted: tuple[str, str] | None = None
-    accept_manual = str(os.environ.get("SCYTALEDROID_V3_ACCEPT_MANUAL_INTERACTIVE") or "").strip().lower() in {"1", "true", "yes", "on"}
+    accept_manual = str(
+        os.environ.get("SCYTALEDROID_V3_ACCEPT_MANUAL_INTERACTIVE") or ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
 
     for mf in sorted(evidence_root.glob("*/run_manifest.json")):
         run_dir = mf.parent
@@ -93,7 +99,11 @@ def _find_latest_runs_for_package(*, evidence_root: Path, package: str) -> tuple
         # Use scenario ended_at when available; fall back to manifest ended_at.
         ended_at = None
         if isinstance(inputs.manifest, dict):
-            scen = inputs.manifest.get("scenario") if isinstance(inputs.manifest.get("scenario"), dict) else {}
+            scen = (
+                inputs.manifest.get("scenario")
+                if isinstance(inputs.manifest.get("scenario"), dict)
+                else {}
+            )
             ended_at = str(scen.get("ended_at") or inputs.manifest.get("ended_at") or "").strip()
         ended_key = ended_at or "0000-00-00T00:00:00Z"
         if phase == "idle":
@@ -103,7 +113,10 @@ def _find_latest_runs_for_package(*, evidence_root: Path, package: str) -> tuple
             if latest_scripted is None or ended_key > latest_scripted[0]:
                 latest_scripted = (ended_key, inputs.run_id)
 
-    return (latest_baseline[1] if latest_baseline else None, latest_scripted[1] if latest_scripted else None)
+    return (
+        latest_baseline[1] if latest_baseline else None,
+        latest_scripted[1] if latest_scripted else None,
+    )
 
 
 def _window_rows_for_run(*, run_dir: Path) -> tuple[list[dict[str, Any]], int]:
@@ -124,7 +137,9 @@ def _window_rows_for_run(*, run_dir: Path) -> tuple[list[dict[str, Any]], int]:
     return rows, int(dropped)
 
 
-def _write_window_scores_csv(path: Path, *, rows: list[dict[str, Any]], scores: np.ndarray, threshold: float) -> None:
+def _write_window_scores_csv(
+    path: Path, *, rows: list[dict[str, Any]], scores: np.ndarray, threshold: float
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     n = min(len(rows), int(scores.shape[0]))
     out: list[dict[str, Any]] = []
@@ -143,7 +158,12 @@ def _write_window_scores_csv(path: Path, *, rows: list[dict[str, Any]], scores: 
             }
         )
     with path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(out[0].keys()) if out else ["window_index", "score", "threshold", "is_exceedance"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=list(out[0].keys())
+            if out
+            else ["window_index", "score", "threshold", "is_exceedance"],
+        )
         w.writeheader()
         for r in out:
             w.writerow(r)
@@ -171,7 +191,9 @@ def _write_baseline_threshold(path: Path, *, thresholds: dict[str, float]) -> No
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def derive_profile_v3_ml_for_package(*, package: str, evidence_root: Path | None = None) -> V3MlDeriveResult:
+def derive_profile_v3_ml_for_package(
+    *, package: str, evidence_root: Path | None = None
+) -> V3MlDeriveResult:
     """Derive ML artifacts for the latest baseline+scripted runs of a package."""
 
     root = evidence_root or dynamic_evidence_root()
@@ -192,6 +214,26 @@ def derive_profile_v3_ml_for_package(*, package: str, evidence_root: Path | None
 
     baseline_dir = root / baseline_rid
     scripted_dir = (root / scripted_rid) if scripted_rid else None
+
+    # This legacy pipeline writes directly inside packs. V2 sealed inputs require
+    # a separately versioned derivation workflow; never train or mutate in place.
+    from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
+
+    if any(
+        EvidencePackWriter(path).is_v2_sealed()
+        for path in (baseline_dir, scripted_dir)
+        if path is not None
+    ):
+        return V3MlDeriveResult(
+            package=pkg,
+            baseline_run_id=baseline_rid,
+            scripted_run_id=scripted_rid,
+            trained=False,
+            wrote_baseline=False,
+            wrote_scripted=False,
+            threshold_iforest=None,
+            errors=("sealed_v2_requires_external_derivation",),
+        )
 
     try:
         base_rows, _ = _window_rows_for_run(run_dir=baseline_dir)
@@ -241,7 +283,13 @@ def derive_profile_v3_ml_for_package(*, package: str, evidence_root: Path | None
         for spec in specs:
             model = fit_model(spec, X_train)
             scores_train = anomaly_scores(spec.name, model, X_train)
-            thr = float(np_percentile(scores_train, float(config.THRESHOLD_PERCENTILE), method=config.NP_PERCENTILE_METHOD))
+            thr = float(
+                np_percentile(
+                    scores_train,
+                    float(config.THRESHOLD_PERCENTILE),
+                    method=config.NP_PERCENTILE_METHOD,
+                )
+            )
             thresholds[spec.name] = thr
         trained = True
     except Exception as exc:  # noqa: BLE001
@@ -269,9 +317,16 @@ def derive_profile_v3_ml_for_package(*, package: str, evidence_root: Path | None
         iforest_spec = next(s for s in specs if s.name == config.MODEL_IFOREST)
         model_if = fit_model(iforest_spec, X_train)
         scores_base = anomaly_scores(iforest_spec.name, model_if, X_train)
-        out_base = MLOutputPaths(run_dir=baseline_dir, schema_label=config.ML_SCHEMA_LABEL).output_dir
-        _write_window_scores_csv(out_base / "window_scores.csv", rows=base_rows, scores=scores_base, threshold=thr_if)
-        _write_baseline_threshold(out_base / "baseline_threshold.json", thresholds={k: float(v) for k, v in thresholds.items()})
+        out_base = MLOutputPaths(
+            run_dir=baseline_dir, schema_label=config.ML_SCHEMA_LABEL
+        ).output_dir
+        _write_window_scores_csv(
+            out_base / "window_scores.csv", rows=base_rows, scores=scores_base, threshold=thr_if
+        )
+        _write_baseline_threshold(
+            out_base / "baseline_threshold.json",
+            thresholds={k: float(v) for k, v in thresholds.items()},
+        )
         wrote_baseline = True
     except Exception as exc:  # noqa: BLE001
         errors.append(f"write_baseline_failed:{type(exc).__name__}:{exc}")
@@ -284,9 +339,16 @@ def derive_profile_v3_ml_for_package(*, package: str, evidence_root: Path | None
             iforest_spec = next(s for s in specs if s.name == config.MODEL_IFOREST)
             model_if = fit_model(iforest_spec, X_train)
             scores_scr = anomaly_scores(iforest_spec.name, model_if, X_scr)
-            out_scr = MLOutputPaths(run_dir=scripted_dir, schema_label=config.ML_SCHEMA_LABEL).output_dir
-            _write_window_scores_csv(out_scr / "window_scores.csv", rows=scr_rows, scores=scores_scr, threshold=thr_if)
-            _write_baseline_threshold(out_scr / "baseline_threshold.json", thresholds={k: float(v) for k, v in thresholds.items()})
+            out_scr = MLOutputPaths(
+                run_dir=scripted_dir, schema_label=config.ML_SCHEMA_LABEL
+            ).output_dir
+            _write_window_scores_csv(
+                out_scr / "window_scores.csv", rows=scr_rows, scores=scores_scr, threshold=thr_if
+            )
+            _write_baseline_threshold(
+                out_scr / "baseline_threshold.json",
+                thresholds={k: float(v) for k, v in thresholds.items()},
+            )
             wrote_scripted = True
         except Exception as exc:  # noqa: BLE001
             errors.append(f"write_scripted_failed:{type(exc).__name__}:{exc}")

@@ -85,7 +85,9 @@ class DynamicAnalysisEngine:
                 ended_at=now,
                 status="blocked",
                 notes="Dynamic execution blocked by plan validation.",
-                errors=list(validation.reasons) if validation.reasons else ["dynamic plan validation failed"],
+                errors=list(validation.reasons)
+                if validation.reasons
+                else ["dynamic plan validation failed"],
                 dynamic_run_id=dynamic_run_id,
                 evidence_path=evidence_path,
             )
@@ -110,7 +112,9 @@ class DynamicAnalysisEngine:
         missing_tools = missing_required_tools(tier=self.config.tier)
         if missing_tools:
             now = datetime.now(UTC)
-            dynamic_run_id, evidence_path = self._write_blocked_tools_missing(plan_payload, missing_tools)
+            dynamic_run_id, evidence_path = self._write_blocked_tools_missing(
+                plan_payload, missing_tools
+            )
             blocked = DynamicSessionResult(
                 package_name=self.config.package_name,
                 duration_seconds=self.config.duration_seconds,
@@ -143,7 +147,23 @@ class DynamicAnalysisEngine:
         run_config = self.config
         if validation is not None:
             run_config = replace(self.config, plan_validation=validation)
-        session_result = run_dynamic_session(run_config, plan_payload=dict(plan_payload) if plan_payload else None)
+        session_result = run_dynamic_session(
+            run_config, plan_payload=dict(plan_payload) if plan_payload else None
+        )
+        if session_result.startup_failure:
+            # Pre-capture failure: no probes, quota updates or database persistence.
+            return DynamicEngineResult(
+                config=self.config,
+                session=session_result,
+                plan=plan_payload,
+                probe_summary={},
+                summary_payload={
+                    "dynamic_run_id": session_result.dynamic_run_id,
+                    "status": "failed",
+                    "evidence_path": session_result.evidence_path,
+                    "startup_failure": session_result.startup_failure,
+                },
+            )
         probe_summary = run_probe_set(self.config, plan_payload)
         summary_payload = {
             "dynamic_run_id": session_result.dynamic_run_id,
@@ -209,14 +229,19 @@ class DynamicAnalysisEngine:
         if not validation.is_pass:
             self.logger.warning(
                 "Dynamic plan validation failed",
-                extra={"plan_path": self.config.plan_path, "validation": build_plan_validation_event(validation)},
+                extra={
+                    "plan_path": self.config.plan_path,
+                    "validation": build_plan_validation_event(validation),
+                },
             )
             return None, validation
         return payload, validation
 
     def _write_blocked_event(self, validation) -> tuple[str | None, str | None]:
         dynamic_run_id = str(uuid.uuid4())
-        output_root = Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
+        output_root = (
+            Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
+        )
         run_dir = output_root / dynamic_run_id
         writer = EvidencePackWriter(run_dir)
         writer.ensure_layout()
@@ -312,7 +337,9 @@ class DynamicAnalysisEngine:
     ) -> tuple[str | None, str | None]:
         """Write a blocked evidence pack for missing host tools (dataset tier)."""
         dynamic_run_id = str(uuid.uuid4())
-        output_root = Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
+        output_root = (
+            Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
+        )
         run_dir = output_root / dynamic_run_id
         writer = EvidencePackWriter(run_dir)
         writer.ensure_layout()
@@ -346,7 +373,9 @@ class DynamicAnalysisEngine:
             batch_id=self.config.batch_id,
         )
         event_logger = RunEventLogger(run_ctx)
-        event_logger.log("preflight.tools_missing", {"missing_tools": missing_tools, "tier": self.config.tier})
+        event_logger.log(
+            "preflight.tools_missing", {"missing_tools": missing_tools, "tier": self.config.tier}
+        )
         dynamic_logger.warning(
             "Dynamic preflight blocked run",
             extra={
@@ -361,11 +390,15 @@ class DynamicAnalysisEngine:
         protocol = peek_next_run_protocol(self.config.package_name, tier=self.config.tier)
         run_profile = (protocol or {}).get("run_profile") if isinstance(protocol, dict) else None
         run_sequence = (protocol or {}).get("run_sequence") if isinstance(protocol, dict) else None
-        interaction_level = "minimal" if str(run_profile or "").lower().startswith("baseline") else "interactive"
+        interaction_level = (
+            "minimal" if str(run_profile or "").lower().startswith("baseline") else "interactive"
+        )
 
         # Deterministic invalid reason code: pick one (no lists) per PM contract.
         missing = {str(t).lower() for t in missing_tools}
-        invalid_reason = "MISSING_TOOLS_CAPINFOS" if "capinfos" in missing else "MISSING_TOOLS_TSHARK"
+        invalid_reason = (
+            "MISSING_TOOLS_CAPINFOS" if "capinfos" in missing else "MISSING_TOOLS_TSHARK"
+        )
 
         dataset_validity = {
             "valid_dataset_run": False,
@@ -386,7 +419,19 @@ class DynamicAnalysisEngine:
             dataset={
                 "tier": self.config.tier,
                 "countable": str(self.config.tier).lower() == "dataset",
-                **{k: v for k, v in dataset_validity.items() if k in {"valid_dataset_run", "invalid_reason_code", "min_pcap_bytes", "sampling_duration_seconds", "short_run", "no_traffic_observed"}},
+                **{
+                    k: v
+                    for k, v in dataset_validity.items()
+                    if k
+                    in {
+                        "valid_dataset_run",
+                        "invalid_reason_code",
+                        "min_pcap_bytes",
+                        "sampling_duration_seconds",
+                        "short_run",
+                        "no_traffic_observed",
+                    }
+                },
             },
             target={
                 "package_name": self.config.package_name,
@@ -480,8 +525,8 @@ class DynamicAnalysisEngine:
         try:
             run_dir = resolve_evidence_path(session_result.evidence_path)
             if run_dir:
-                writer = EvidencePackWriter(run_dir)
-                path = run_dir / "analysis" / "index" / "v1" / "db_persistence_status.json"
+                writer = EvidencePackWriter(run_dir).derived_writer()
+                path = writer.run_dir / "analysis" / "index" / "v1" / "db_persistence_status.json"
                 if not path.exists():
                     writer.write_json(
                         "analysis/index/v1/db_persistence_status.json",
@@ -515,7 +560,7 @@ class DynamicAnalysisEngine:
         run_dir = resolve_evidence_path(session_result.evidence_path)
         if not run_dir:
             return
-        writer = EvidencePackWriter(run_dir)
+        writer = EvidencePackWriter(run_dir).derived_writer()
 
         # Engine outputs are derived artifacts. Do not mutate run_manifest.json post-seal
         # to "register" them; the freeze manifest checksums are the immutability anchor.
@@ -535,7 +580,11 @@ class DynamicAnalysisEngine:
         if isinstance(stats, dict):
             net_rows = stats.get("netstats_rows")
             net_missing = stats.get("netstats_missing_rows")
-            if (net_rows == 0 or net_rows is None) and isinstance(net_missing, int) and net_missing > 0:
+            if (
+                (net_rows == 0 or net_rows is None)
+                and isinstance(net_missing, int)
+                and net_missing > 0
+            ):
                 warnings.append("netstats_missing_rows_present")
 
         run_dir = resolve_evidence_path(session_result.evidence_path)
@@ -600,7 +649,6 @@ class DynamicAnalysisEngine:
         except OSError:
             warnings.append("pcap_file_stat_failed")
         return warnings
-
 
 
 def run_dynamic_engine(config: DynamicSessionConfig) -> DynamicEngineResult:

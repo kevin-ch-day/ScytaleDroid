@@ -11,7 +11,14 @@ from scytaledroid.DeviceAnalysis.services import apk_library_service
 
 from . import package_contract, package_refresh, stale_replan
 from .common import DedupeTracker, HarvestOptions, package_evidence_dir
-from .models import ArtifactError, ArtifactPlan, ArtifactResult, PackagePlan, PullResult
+from .models import (
+    CANONICAL_MATERIALIZATION_FAILED,
+    ArtifactError,
+    ArtifactPlan,
+    ArtifactResult,
+    PackagePlan,
+    PullResult,
+)
 
 EmitFn = Callable[[str, str, Mapping[str, object | None], str | None], None]
 
@@ -116,14 +123,22 @@ def execute_package_plan(
             group_id=group_id,
             package_name=package_name,
         )
-        package_contract.finalize_package_result(result, write_db_requested=request.options.write_db)
+        package_contract.finalize_package_result(
+            result, write_db_requested=request.options.write_db
+        )
         apk_library_service.register_result(
             result,
             serial=request.serial,
             session_stamp=request.session_stamp,
         )
 
-    if effective_options.write_db and request.db_install_sets is not None and result.ok:
+    if (
+        effective_options.write_db
+        and request.db_install_sets is not None
+        and result.ok
+        and result.capture_status == "clean"
+        and not result.errors
+    ):
         deps.persist_install_set_spine(
             result=result,
             serial=request.serial,
@@ -135,7 +150,9 @@ def execute_package_plan(
             emit=request.emit,
             base_context=request.base_context,
         )
-        package_contract.finalize_package_result(result, write_db_requested=request.options.write_db)
+        package_contract.finalize_package_result(
+            result, write_db_requested=request.options.write_db
+        )
     package_contract.write_package_manifest(
         result=result,
         package_dir=package_dir,
@@ -283,7 +300,9 @@ def _prepare_db_mirror(
             )
             request.stats["db_app_definitions"] += 1
         except Exception as exc:
-            deps.log_warning(f"Failed to ensure app definition for {package_name}: {exc}", "database")
+            deps.log_warning(
+                f"Failed to ensure app definition for {package_name}: {exc}", "database"
+            )
             request.stats["db_errors"] += 1
             request.emit(
                 "warning",
@@ -299,7 +318,11 @@ def _prepare_db_mirror(
             effective_options = _without_db(request.options)
 
     group_id: int | None = None
-    if effective_options.write_db and request.db_repo is not None and len(request.plan.artifacts) > 1:
+    if (
+        effective_options.write_db
+        and request.db_repo is not None
+        and len(request.plan.artifacts) > 1
+    ):
         try:
             group_id = request.db_repo.ensure_split_group(
                 package_name,
@@ -388,7 +411,9 @@ def _run_artifact_loop(
                 if next_plan is not None and not result.ok:
                     package_dir = package_evidence_dir(request.dest_root, next_plan.inventory)
                     package_dir.mkdir(parents=True, exist_ok=True)
-                    result.package_manifest_path = package_contract.package_manifest_path(package_dir)
+                    result.package_manifest_path = package_contract.package_manifest_path(
+                        package_dir
+                    )
                 artifact_total = next_total
                 artifact_index = next_index
                 continue
@@ -400,17 +425,32 @@ def _run_artifact_loop(
             request.stats["artifacts_skipped"] += 1
         elif isinstance(artifact_result, ArtifactResult):
             result.ok.append(artifact_result)
-            if artifact_result.mirror_failure_reasons:
-                result.mirror_failure_reasons.extend(artifact_result.mirror_failure_reasons)
-                result.skipped.extend(artifact_result.mirror_failure_reasons)
-            package_stats["saved"] += 1
-            try:
-                size = artifact_result.dest_path.stat().st_size
-                package_stats["bytes"] += size
-                request.stats["bytes_written"] += size
-            except FileNotFoundError:
-                pass
-            request.stats["artifacts_written"] += 1
+            if artifact_result.status == CANONICAL_MATERIALIZATION_FAILED:
+                result.errors.append(
+                    ArtifactError(
+                        source_path=artifact_result.source_path,
+                        reason=CANONICAL_MATERIALIZATION_FAILED,
+                        sha256=artifact_result.sha256,
+                        session_copy=str(artifact_result.dest_path),
+                        file_name=artifact_result.file_name,
+                    )
+                )
+                if CANONICAL_MATERIALIZATION_FAILED not in result.mirror_failure_reasons:
+                    result.mirror_failure_reasons.append(CANONICAL_MATERIALIZATION_FAILED)
+                package_stats["errors"] += 1
+                request.stats["artifacts_failed"] += 1
+            else:
+                if artifact_result.mirror_failure_reasons:
+                    result.mirror_failure_reasons.extend(artifact_result.mirror_failure_reasons)
+                    result.skipped.extend(artifact_result.mirror_failure_reasons)
+                package_stats["saved"] += 1
+                try:
+                    size = artifact_result.dest_path.stat().st_size
+                    package_stats["bytes"] += size
+                    request.stats["bytes_written"] += size
+                except FileNotFoundError:
+                    pass
+                request.stats["artifacts_written"] += 1
         elif isinstance(artifact_result, ArtifactError):
             result.errors.append(artifact_result)
             package_stats["errors"] += 1
@@ -487,7 +527,9 @@ def _handle_stale_replan(
         if recoverable_inventory_drift:
             result.stale_replan_details["recovered_inventory_drift"] = True
         if drift_reasons:
-            result.stale_replan_details["blocking_inventory_drift"] = not recoverable_inventory_drift
+            result.stale_replan_details[
+                "blocking_inventory_drift"
+            ] = not recoverable_inventory_drift
             if not recoverable_inventory_drift:
                 result.drift_reasons = list(drift_reasons)
                 result.capture_status = "drifted"
