@@ -155,6 +155,28 @@ def test_prune_inventory_files_keeps_last_n_snapshots(tmp_path, monkeypatch):
     assert remaining == [f"inventory_{ts}.json" for ts in stamps[-5:]]
 
 
+def test_load_previous_inventory_ignores_latest_pointer_and_metadata(tmp_path, monkeypatch):
+    serial = "TESTSERIAL"
+    inv_dir = tmp_path / serial / "inventory"
+    inv_dir.mkdir(parents=True)
+    (inv_dir / "inventory_20260101-000001.json").write_text(
+        '{"snapshot_id": 1}', encoding="utf-8"
+    )
+    (inv_dir / "inventory_20260101-000002.json").write_text(
+        '{"snapshot_id": 2}', encoding="utf-8"
+    )
+    (inv_dir / "inventory_20260101-000002.meta.json").write_text("{}", encoding="utf-8")
+    (inv_dir / "inventory_20260101-000003.scoped.json").write_text(
+        '{"snapshot_id": 99}', encoding="utf-8"
+    )
+    (inv_dir / "latest.json").write_text('{"snapshot_id": 2}', encoding="utf-8")
+    monkeypatch.setattr(snapshot_io, "_STATE_ROOT", tmp_path)
+
+    previous = snapshot_io.load_previous_inventory(serial)
+
+    assert previous == {"snapshot_id": 1}
+
+
 def test_persist_snapshot_round_trips_fast_mode_fidelity_metadata(tmp_path, monkeypatch):
     serial = "TESTSERIAL"
 

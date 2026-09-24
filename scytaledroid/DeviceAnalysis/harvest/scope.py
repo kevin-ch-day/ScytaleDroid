@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -475,6 +475,8 @@ def select_package_scope(
     device_serial: str,
     is_rooted: bool,
     google_allowlist: Iterable[str | None] = None,
+    changed_rows: Sequence[InventoryRow] | None = None,
+    changed_summary: Mapping[str, object] | None = None,
 ) -> ScopeSelection | None:
     """Prompt the analyst to choose a harvesting scope and return the filtered list."""
 
@@ -485,15 +487,9 @@ def select_package_scope(
     allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
     context = build_scope_context(rows, allow)
     # Note: profile groups / watchlists are rendered inside build_scope_context() output.
-    updated_rows, updated_meta = filter_updated_only(rows)
+    delta_rows = list(changed_rows or [])
     if not is_rooted:
-        readable_updated = [
-            row for row in updated_rows if any(rules.is_user_path(path) for path in row.apk_paths)
-        ]
-        if len(readable_updated) != len(updated_rows):
-            updated_meta = dict(updated_meta)
-            updated_meta["filtered_non_user"] = len(updated_rows) - len(readable_updated)
-        updated_rows = readable_updated
+        delta_rows = _rows_pullable_under_path_policy(delta_rows, is_rooted=False)
 
     while True:
         option_handlers: dict[str, Callable[[], ScopeSelection | None]] = {}
@@ -548,6 +544,20 @@ def select_package_scope(
             if (not is_rooted and blocked_full)
             else ("root device · full paths" if is_rooted else None)
         )
+        if delta_rows:
+            _add_entry(
+                "U",
+                "Changed apps only",
+                packages=len(delta_rows),
+                pullable=len(delta_rows),
+                files=estimated_files(delta_rows),
+                note="since previous inventory",
+                handler=lambda: _scope_inventory_delta(
+                    rows,
+                    delta_rows,
+                    changed_summary or {},
+                ),
+            )
         _add_entry(
             "1",
             FULL_INVENTORY_MENU_LABEL,
@@ -608,6 +618,7 @@ def select_package_scope(
             is_rooted,
             entries=entries,
             last_scope=_LAST_SCOPE,
+            recommended_key="U" if delta_rows else "1",
         )
 
         valid_choices = [entry.key for entry in entries] + ["0"]
@@ -615,9 +626,9 @@ def select_package_scope(
             valid_choices.append("R")
         choice = prompt_utils.get_choice(
             valid_choices,
-            default="1",
+            default="U" if delta_rows else "1",
             casefold=True,
-            prompt="Select collection [1]: ",
+            prompt=f"Select collection [{'U' if delta_rows else '1'}]: ",
         )
         if choice == "0":
             return None
@@ -709,6 +720,7 @@ def _render_scope_table(
     *,
     entries: Sequence[_ScopeMenuDisplayRow],
     last_scope: ScopeSelection | None,
+    recommended_key: str = "1",
 ) -> None:
     print()
     menu_utils.print_header("Harvest Scope")
@@ -729,21 +741,22 @@ def _render_scope_table(
         print("System/product/vendor APK paths remain inventoried but are not pulled.")
     if last_scope is not None:
         _render_last_scope_block(last_scope, is_rooted=is_rooted)
-    primary = next((entry for entry in entries if entry.key == "1"), None)
-    secondary = [entry for entry in entries if entry.key != "1"]
+    primary = next((entry for entry in entries if entry.key == recommended_key), None)
+    secondary = [entry for entry in entries if entry.key != recommended_key]
     if primary is not None:
         print()
         print("Most common action")
         print("------------------")
         print(
-            f"1) {primary.label} [recommended] — "
+            f"{primary.key}) {primary.label} [recommended] — "
             f"{_format_count_cell(primary.pullable_count)} packages · "
             f"~{_format_count_cell(primary.estimated_apks)} APK files"
         )
     if secondary:
         print()
-        print("Pull a smaller collection")
-        print("-------------------------")
+        section_title = "Pull a smaller collection" if recommended_key == "1" else "Other collections"
+        print(section_title)
+        print("-" * len(section_title))
         for entry in secondary:
             detail = str(entry.note or "").strip()
             if entry.pullable_count not in {None, _DASH}:
@@ -801,6 +814,27 @@ def _scope_updated_only(
     }
     # Inventory-only deltas are metadata-based under non-root constraints, not build-identity claims.
     return ScopeSelection("Changed apps only", list(updated_rows), "updated_only", metadata)
+
+
+def _scope_inventory_delta(
+    rows: Sequence[InventoryRow],
+    changed_rows: Sequence[InventoryRow],
+    summary: Mapping[str, object],
+) -> ScopeSelection:
+    """Build an explicit scope for the package delta from the latest inventory sync."""
+
+    metadata = {
+        "estimated_files": estimated_files(changed_rows),
+        "candidate_count": len(rows),
+        "selected_count": len(changed_rows),
+        "inventory_delta_selection": True,
+        "delta_filter_applied": True,
+        "delta_filter_total": int(summary.get("total_changed") or len(changed_rows)),
+        "delta_filter_matched": len(changed_rows),
+        "delta_filter_packages": sorted(row.package_name for row in changed_rows),
+        "package_delta_summary": dict(summary),
+    }
+    return ScopeSelection("Changed apps only", list(changed_rows), "inventory_delta", metadata)
 
 
 def _scope_profiles(

@@ -19,6 +19,7 @@ from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (
     get_latest_inventory_metadata,
 )
 from scytaledroid.DeviceAnalysis.harvest import stale_replan
+from scytaledroid.DeviceAnalysis.harvest.scope_context import filter_updated_only
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.DisplayUtils import text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_engine
@@ -480,11 +481,22 @@ def resolve_harvest_plan(
                 # Auto-scope reason is kept in metadata for summaries; no CLI noise here.
                 pass
         else:
+            initial_summary = delta.extract_delta_summary(guard_metadata or {})
+            changed_rows = None
+            if initial_summary:
+                changed_names = delta.collect_delta_package_names(initial_summary)
+                changed_rows = delta.apply_delta_filter(active_rows, include=changed_names)
+                # A saved inventory delta remains useful after the sync, but it
+                # must disappear from the action menu once those exact versions
+                # have already been captured in the APK repository.
+                changed_rows, _ = filter_updated_only(changed_rows)
             selection = harvest.select_package_scope(
                 active_rows,
                 device_serial=serial,
                 is_rooted=is_rooted,
                 google_allowlist=google_allowlist,
+                changed_rows=changed_rows,
+                changed_summary=initial_summary,
             )
         if selection is None:
             ui.report_apk_pull_cancelled()
@@ -543,7 +555,9 @@ def resolve_harvest_plan(
         delta_applied = False
         delta_count = len(selection.packages)
         if summary and not bool(selection.metadata.get("disable_delta_filter")):
-            if apply_delta_filter_choice is None and not noninteractive:
+            if bool(selection.metadata.get("inventory_delta_selection")):
+                apply_delta_filter_choice = True
+            elif apply_delta_filter_choice is None and not noninteractive:
                 apply_delta_filter_choice = ui.prompt_delta_filter_mode(summary)
             if apply_delta_filter_choice is False:
                 selection.metadata["disable_delta_filter"] = True

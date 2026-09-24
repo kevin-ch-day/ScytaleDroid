@@ -333,6 +333,45 @@ def get_latest_inventory_metadata(
             recorded_delta = coerce_int(
                 getattr(delta_obj, "changed_packages_count", None)
             )
+
+    # Inventory metadata written before named deltas were retained contains only
+    # counts. Recover the exact latest-sync cohort from the preceding canonical
+    # snapshot so the harvest menu can offer a safe changed-apps-only action.
+    if recorded_delta and snapshot_packages:
+        previous_snapshot = inventory_service.load_previous_inventory(serial)
+        previous_packages = (
+            previous_snapshot.get("packages")
+            if isinstance(previous_snapshot, dict)
+            else None
+        )
+        if isinstance(previous_packages, list):
+            latest_signatures: list[tuple[str, str | None, str | None]] = []
+            for entry in snapshot_packages:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("package_name")
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                version_code = entry.get("version_code")
+                latest_signatures.append(
+                    (
+                        name,
+                        str(version_code).strip()
+                        if isinstance(version_code, (int, str))
+                        else None,
+                        entry.get("version_name")
+                        if isinstance(entry.get("version_name"), str)
+                        else None,
+                    )
+                )
+            sync_delta = build_package_delta_summary(
+                previous_packages,
+                latest_signatures,
+                limit=None,
+            )
+            if sync_delta and int(sync_delta.get("total_changed") or 0) == recorded_delta:
+                metadata["package_delta_summary"] = sync_delta
+                metadata["package_delta_source"] = "latest_inventory_sync"
     if snapshot_type != "subset":
         # If the last sync recorded zero changes, treat that as authoritative and
         # do not mark the snapshot as changed unless scope/hash/fingerprint differ.
@@ -429,6 +468,7 @@ def get_latest_inventory_metadata(
             )
             if package_delta_summary:
                 metadata["package_delta_summary"] = package_delta_summary
+                metadata["package_delta_source"] = "current_device_state"
 
     final_packages_changed = bool(metadata.get("packages_changed"))
     state_changed = (

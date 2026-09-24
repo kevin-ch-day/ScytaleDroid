@@ -166,6 +166,75 @@ def test_select_package_scope_menu_makes_full_pull_the_default(monkeypatch, caps
     assert "Pull a smaller collection" in out
 
 
+def test_select_package_scope_makes_latest_inventory_delta_the_compact_default(
+    monkeypatch, capsys
+) -> None:
+    alpha = _row("com.example.alpha", "Alpha")
+    beta = _row("com.example.beta", "Beta")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(scope, "_LAST_SCOPE", None)
+    monkeypatch.setattr(scope, "_load_active_profile_scopes", lambda rows, device_serial: [])
+
+    def _choice(*_args, **kwargs):
+        captured.update(kwargs)
+        return "u"
+
+    monkeypatch.setattr(scope.prompt_utils, "get_choice", _choice)
+    summary = {
+        "total_added": 0,
+        "total_removed": 0,
+        "total_updated": 1,
+        "total_changed": 1,
+        "updated_full": [{"package": alpha.package_name}],
+    }
+
+    selection = scope.select_package_scope(
+        [alpha, beta],
+        device_serial="SERIAL123",
+        is_rooted=False,
+        changed_rows=[alpha],
+        changed_summary=summary,
+    )
+
+    assert selection is not None
+    assert selection.kind == "inventory_delta"
+    assert [row.package_name for row in selection.packages] == [alpha.package_name]
+    assert selection.metadata["inventory_delta_selection"] is True
+    assert captured["default"] == "U"
+    out = capsys.readouterr().out
+    assert "U) Changed apps only [recommended]" in out
+    assert "since previous inventory" not in out
+    assert "Other collections" in out
+
+
+def test_select_package_scope_omits_unpullable_delta_on_non_root_device(
+    monkeypatch, capsys
+) -> None:
+    alpha = _row("com.example.alpha", "Alpha")
+    system = _row(
+        "com.example.system",
+        "System",
+        primary_path="/system/app/System/base.apk",
+    )
+
+    monkeypatch.setattr(scope, "_LAST_SCOPE", None)
+    monkeypatch.setattr(scope, "_load_active_profile_scopes", lambda rows, device_serial: [])
+    monkeypatch.setattr(scope.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
+
+    selection = scope.select_package_scope(
+        [alpha, system],
+        device_serial="SERIAL123",
+        is_rooted=False,
+        changed_rows=[system],
+        changed_summary={"total_changed": 1},
+    )
+
+    assert selection is not None
+    assert selection.kind == "everything"
+    assert "Changed apps only" not in capsys.readouterr().out
+
+
 def test_select_package_scope_menu_labels_full_pull_clearly(monkeypatch, capsys) -> None:
     alpha = _row("com.example.alpha", "Alpha")
 

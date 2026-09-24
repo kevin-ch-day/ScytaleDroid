@@ -108,6 +108,66 @@ def test_get_latest_inventory_metadata_treats_version_code_change_as_package_cha
     assert metadata["package_delta_summary"]["total_updated"] == 1
 
 
+def test_get_latest_inventory_metadata_recovers_named_latest_sync_delta(monkeypatch) -> None:
+    snapshot_meta = SimpleNamespace(
+        captured_at=datetime.now(UTC),
+        package_count=1,
+        snapshot_id=12,
+        package_list_hash="abc",
+        package_signature_hash="def",
+        build_fingerprint="fingerprint",
+        duration_seconds=5.0,
+        scope_hashes=None,
+        snapshot_type="full",
+        scope_hash=None,
+        scope_size=1,
+        delta_new=0,
+        delta_removed=0,
+        delta_updated=1,
+        delta_changed_count=1,
+        delta_split_delta=0,
+        delta_details=None,
+    )
+    current = {
+        "packages": [
+            {
+                "package_name": "com.example.app",
+                "version_code": "2",
+                "version_name": "2.0",
+            }
+        ]
+    }
+    previous = {
+        "packages": [
+            {
+                "package_name": "com.example.app",
+                "version_code": "1",
+                "version_name": "1.0",
+            }
+        ]
+    }
+
+    monkeypatch.setattr(loader.inventory_service, "load_latest_snapshot_meta", lambda _serial: snapshot_meta)
+    monkeypatch.setattr(loader.inventory_service, "load_latest_inventory", lambda _serial: current)
+    monkeypatch.setattr(loader.inventory_service, "load_previous_inventory", lambda _serial: previous)
+    monkeypatch.setattr(
+        loader.device_service,
+        "list_packages_with_versions",
+        lambda _serial: [("com.example.app", "2", "2.0")],
+    )
+    monkeypatch.setattr(loader.device_service, "get_basic_properties", lambda _serial: {"build_fingerprint": "fingerprint"})
+    monkeypatch.setattr(loader.inventory_service, "compute_signature_hash", lambda entries: "sig")
+
+    metadata = loader.get_latest_inventory_metadata("SER123", with_current_state=True)
+
+    assert metadata is not None
+    assert metadata["package_delta_source"] == "latest_inventory_sync"
+    assert metadata["package_delta_summary"]["total_changed"] == 1
+    assert metadata["package_delta_summary"]["updated_full"] == [
+        {"package": "com.example.app", "before": "1", "after": "2"}
+    ]
+
+
 def test_get_latest_inventory_metadata_ignores_version_name_only_change_for_package_identity(
     monkeypatch,
 ) -> None:

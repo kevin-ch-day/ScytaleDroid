@@ -245,7 +245,6 @@ def load_latest_inventory(serial: str) -> dict[str, object | None]:
     latest_file = _STATE_ROOT / serial / "inventory" / "latest.json"
     if not latest_file.exists():
         return None
-
     try:
         return json.loads(latest_file.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
@@ -254,6 +253,28 @@ def load_latest_inventory(serial: str) -> dict[str, object | None]:
             category="device",
         )
         return None
+
+
+def load_previous_inventory(serial: str) -> dict[str, object | None] | None:
+    """Return the canonical snapshot immediately before ``latest.json``.
+
+    Scoped snapshots and metadata sidecars are intentionally excluded.  This is
+    used to recover the exact package names behind the count-only delta stored by
+    older inventory metadata files.
+    """
+
+    inventory_dir = _STATE_ROOT / serial / "inventory"
+    pattern = re.compile(r"^inventory_\d{8}-\d{6}\.json$")
+    snapshots = sorted(
+        path for path in inventory_dir.glob("inventory_*.json") if pattern.match(path.name)
+    )
+    if len(snapshots) < 2:
+        return None
+    try:
+        payload = json.loads(snapshots[-2].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def load_latest_snapshot_meta(serial: str) -> inventory_meta.InventoryMeta | None:
@@ -613,6 +634,7 @@ def persist_snapshot(
 __all__ = [
     "hash_rows",
     "load_latest_inventory",
+    "load_previous_inventory",
     "load_latest_snapshot_meta",
     "persist_snapshot",
     "persist_scoped_snapshot",

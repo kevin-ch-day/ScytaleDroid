@@ -126,6 +126,12 @@ def load_latest_inventory(serial: str) -> dict[str, object | None]:
     return snapshot_io.load_latest_inventory(serial)
 
 
+def load_previous_inventory(serial: str) -> dict[str, object | None] | None:
+    """Return the canonical inventory snapshot preceding the latest snapshot."""
+
+    return snapshot_io.load_previous_inventory(serial)
+
+
 def load_latest_snapshot_meta(serial: str):
     """Return the latest inventory snapshot metadata."""
     return snapshot_io.load_latest_snapshot_meta(serial)
