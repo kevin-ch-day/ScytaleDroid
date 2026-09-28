@@ -3,6 +3,7 @@ from __future__ import annotations
 from scytaledroid.Database.db_utils.bridge_posture import (
     bridge_posture_map,
     bridge_posture_summary,
+    frozen_legacy_write_tables,
     list_bridge_postures,
 )
 
@@ -35,3 +36,7 @@ def test_bridge_posture_map_exposes_risk_scores_and_correlations() -> None:
     assert posture_map["correlations"].posture == "freeze_candidate"
     assert posture_map["correlations"].current_writers == ()
     assert posture_map["correlations"].current_readers == ()
+
+
+def test_frozen_legacy_write_tables_exposes_enforced_candidate() -> None:
+    assert frozen_legacy_write_tables() == frozenset({"correlations"})

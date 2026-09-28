@@ -146,7 +146,9 @@ Current bridge posture:
 
 Immediate bridge tasks:
 
-- make `correlations` the first enforced freeze candidate in tooling/docs
+- **complete:** `correlations` is the first enforced freeze candidate; posture
+  metadata exposes the frozen set and `tests/gates/test_frozen_legacy_bridge_writes.py`
+  rejects new owned-runtime `INSERT`, `REPLACE`, or `UPDATE` statements
 - continue reducing reporting dependence on `findings`/`metrics`/`buckets`/
   `contributors`
 - keep `risk_scores` explicitly framed as derived, not canonical

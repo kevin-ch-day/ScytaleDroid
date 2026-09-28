@@ -151,9 +151,16 @@ def bridge_posture_summary() -> dict[str, int]:
     return counts
 
 
+def frozen_legacy_write_tables() -> frozenset[str]:
+    """Return legacy tables whose posture prohibits new runtime writers."""
+
+    return frozenset(row.table for row in _BRIDGE_POSTURES if row.posture == "freeze_candidate")
+
+
 __all__ = [
     "BridgeTablePosture",
     "bridge_posture_map",
     "bridge_posture_summary",
+    "frozen_legacy_write_tables",
     "list_bridge_postures",
 ]
