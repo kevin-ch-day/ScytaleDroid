@@ -63,6 +63,19 @@ The same helper also reminds operators where device state and static-analysis
 report directories live so they can inspect or archive them manually when
 needed.
 
+## Read-only log health
+
+Use **Evidence & Workspace → Log health (read-only)** or:
+
+```bash
+PYTHONPATH=. python scripts/operator/logs_health.py
+```
+
+The report shows total and per-category size, active and rotated counts, the
+oldest rotation, largest files, and age flags. Set the default age threshold
+with `SCYTALEDROID_LOGS_STALE_DAYS` or override one invocation with
+`--older-than-days`. The command skips symlinks and never changes log files.
+
 ## Recommended cadence
 
 * Use Workspace & Evidence verification checks during collection to avoid silent drift.

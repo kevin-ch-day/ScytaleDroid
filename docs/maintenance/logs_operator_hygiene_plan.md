@@ -54,7 +54,7 @@ Compared **before** the doc-only fix in `housekeeping.md` (this plan records wha
 
 ---
 
-## 6. Later optional read-only “logs health” command (spec only — no implementation)
+## 6. Read-only “logs health” command (implemented)
 
 **Intent:** read-only report for operators (and CI optional), **no deletes**, **no retention changes**.
 
@@ -69,7 +69,11 @@ Suggested outputs:
 | **Largest files** | Top N by size (active + gz) |
 | **Stale over age** | Files (optional: only `.gz` or include active) with mtime **older than** `SCYTALEDROID_LOGS_STALE_DAYS` or CLI `--older-than-days` — **flag only**, no delete |
 
-**Invocation sketch:** `PYTHONPATH=. python scripts/operator/logs_health.py` or Workspace menu item wrapping the same.
+**Invocation:** `PYTHONPATH=. python scripts/operator/logs_health.py` or **Evidence & Workspace → Log health (read-only)**.
+
+The command supports `--json`, `--log-dir`, `--older-than-days`, and `--top`.
+It skips symlinks, reports unreadable files explicitly, and never rotates,
+truncates, compresses, or deletes logs.
 
 ---
 

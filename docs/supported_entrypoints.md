@@ -42,6 +42,7 @@ operator conveniences rather than application-owned logic:
 - `scripts/static_analysis/run_artifact_map.py` (read-only static session artifact audit; contract in `docs/maintenance/static_run_artifact_lifecycle.md`)
 - `scripts/static_analysis/repair_archive_report_lineage.py` (dry-run-first, backup-and-receipt repair for missing archive/latest-mirror lineage; never changes analytical payloads)
 - `scripts/operator/report_system_migration_readiness.py` (read-only workspace, DB, corpus, and paper-freeze transfer preflight)
+- `scripts/operator/logs_health.py` (read-only log storage and retention-signal report)
 
 - `scripts/dynamic/verify_pilot.py` (read-only, externally pinned eight-sample pre-execution packet verification; see `docs/maintenance/pilot_preflight.md`)
 

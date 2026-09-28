@@ -27,6 +27,7 @@ and operator workflows:
 - `scripts/db/report_dynamic_paper_freeze_readiness.py`
 - `scripts/db/report_paper3_writing_package.py`
 - `scripts/operator/report_system_migration_readiness.py` (read-only new-system transfer preflight)
+- `scripts/operator/logs_health.py` (read-only log size, rotation, and age report)
 
 See `docs/supported_entrypoints.md` for the broader supported wrapper list.
 

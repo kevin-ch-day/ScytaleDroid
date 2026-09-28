@@ -228,7 +228,7 @@ Notes:
   - [maintenance/workflow_entrypoint_map.md](../maintenance/workflow_entrypoint_map.md)
 - `maintenance`
   - [maintenance/housekeeping.md](../maintenance/housekeeping.md) — workspace/logs cadence; **refactor tier order** (merged Wave W1)
-  - [maintenance/logs_operator_hygiene_plan.md](../maintenance/logs_operator_hygiene_plan.md) — **P1/P2** logs layout vs code, naming collisions, optional future `logs health` spec (not P0)
+  - [maintenance/logs_operator_hygiene_plan.md](../maintenance/logs_operator_hygiene_plan.md) — **P1/P2** logs layout vs code, naming collisions, and implemented read-only `logs health` report (not P0)
   - [maintenance/legacy_static_deprecation_playbook.md](../maintenance/legacy_static_deprecation_playbook.md) — phased legacy-five retirement + Appendix A compatibility buckets
   - [maintenance/legacy_static_reader_dependency_map.md](../maintenance/legacy_static_reader_dependency_map.md) — legacy static five: readers, false positives, retirement order, §2.1.1 mirror wiring, §8 edge cases (planning)
   - [maintenance/legacy_static_tables_consumer_audit.md](../maintenance/legacy_static_tables_consumer_audit.md) — legacy five index (pointers to map + playbook + Web deep dive)

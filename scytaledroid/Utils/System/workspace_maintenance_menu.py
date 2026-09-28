@@ -390,6 +390,7 @@ def workspace_menu() -> None:
             menu_utils.MenuOption("11", "Clear dangling dynamic/static DB links (safe)"),
             menu_utils.MenuOption("12", "Prune orphan artifact registry rows (safe)"),
             menu_utils.MenuOption("13", "Mercury APK storage mount"),
+            menu_utils.MenuOption("14", "Log health (read-only)"),
         ]
         spec_kwargs = display_settings.apply_menu_defaults(
             {"items": items, "exit_label": "Back", "show_exit": True}
@@ -405,6 +406,12 @@ def workspace_menu() -> None:
             break
         if choice == "1":
             _show_summary()
+        elif choice == "14":
+            from scytaledroid.Utils.System.log_health import collect_log_health, render_log_health
+
+            print()
+            print(render_log_health(collect_log_health()))
+            prompt_utils.press_enter_to_continue()
         elif choice == "2":
             from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_verify_overview
 
