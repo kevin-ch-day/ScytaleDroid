@@ -40,6 +40,7 @@ Questions the model must answer:
 Added:
 
 - `scripts/device_analysis/report_apk_inventory_model.py`
+- `scripts/device_analysis/report_apk_release_variants.py`
 - `scripts/device_analysis/report_legacy_harvest_run_retirement.py`
 - `scripts/device_analysis/report_apk_transition_debt.py`
 - `scripts/device_analysis/repair_regular_legacy_apks.py`

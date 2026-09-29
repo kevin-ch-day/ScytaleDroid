@@ -115,6 +115,7 @@ The current active Paper 3 / APK-storage additions are not archive candidates:
 | `scripts/device_analysis/audit_apk_cold_promotion.py` | Read-only hot/cold candidate classification. |
 | `scripts/device_analysis/promote_apk_blobs_to_cold_store.py` | Dry-run default cold-promotion apply tool. |
 | `scripts/device_analysis/report_apk_inventory_model.py` | APK identity transition and run-retirement analysis. |
+| `scripts/device_analysis/report_apk_release_variants.py` | Read-only same-package/version byte and signer comparison. |
 | `scripts/device_analysis/report_legacy_harvest_run_retirement.py` | Legacy harvest folder retirement safety checks. |
 | `scripts/device_analysis/verify_apk_library_integrity.py` | APK library/storage integrity verification. |
 
@@ -360,6 +361,7 @@ All other paths still need a **per-environment** decision before removal.
 | `repair_apk_library_logical_paths.py` | migration_historical | MIX | none | yes | APK library logical-path repair | APK storage maintenance | keep through rollout |
 | `repair_regular_legacy_apks.py` | workflow_helper | MIX | none | yes | legacy regular APK repair | APK storage maintenance | keep through rollout |
 | `report_apk_inventory_model.py` | workflow_helper | RO | none | yes | APK inventory transition | APK storage maintenance | keep |
+| `report_apk_release_variants.py` | workflow_helper | RO | none | yes | repeated release signer comparison | APK storage maintenance | keep |
 | `report_apk_transition_debt.py` | workflow_helper | RO | none | yes | APK transition debt report | APK storage maintenance | keep |
 | `report_legacy_harvest_run_retirement.py` | workflow_helper | RO | opt | yes | legacy harvest retirement | APK storage maintenance | keep |
 | `thin_harvest_session_apks.py` | workflow_helper | MIX | none | yes | storage thinning receipts | APK storage maintenance | keep |
