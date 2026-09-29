@@ -8,6 +8,7 @@ import csv
 import hashlib
 import json
 import sys
+import zipfile
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
@@ -27,7 +28,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--verify-sha256",
         action="store_true",
-        help="Hash APK bytes and compare them with manifest SHA-256 values. Slower on large stores.",
+        help=(
+            "Hash APK bytes and compare them with manifest SHA-256 values or, when "
+            "scanning the canonical store, the content-addressed filename. Slower on large stores."
+        ),
+    )
+    parser.add_argument(
+        "--scan-canonical-store",
+        action="store_true",
+        help=(
+            "Inspect every canonical data/store APK, including legacy blobs not represented "
+            "by current library manifests, for ZIP structure and AndroidManifest.xml."
+        ),
     )
     parser.add_argument("--json", action="store_true", help="Print summary JSON.")
     return parser
@@ -39,6 +51,7 @@ def build_report(
     output_root: Path | None = None,
     stamp: str | None = None,
     verify_sha256: bool = False,
+    scan_canonical_store: bool = False,
     write_outputs: bool = True,
 ) -> dict[str, Any]:
     data_root = data_root.expanduser()
@@ -60,6 +73,14 @@ def build_report(
         if row:
             artifact_rows.append(row)
         finding_rows.extend(findings)
+
+    canonical_store_rows: list[dict[str, Any]] = []
+    if scan_canonical_store:
+        canonical_store_rows, store_findings = _scan_canonical_store(
+            data_root,
+            verify_sha256=verify_sha256,
+        )
+        finding_rows.extend(store_findings)
 
     severity_counts = Counter(row["severity"] for row in finding_rows)
     status = "BLOCKED" if severity_counts["critical"] or severity_counts["high"] else ("WARN" if severity_counts["medium"] or severity_counts["low"] else "OK")
@@ -86,23 +107,150 @@ def build_report(
         "content_hash_mismatch_count": sum(1 for row in finding_rows if row["finding_id"] == "CONTENT_SPLIT_SET_HASH_MISMATCH"),
         "canonical_path_mismatch_count": sum(1 for row in finding_rows if row["finding_id"] == "CANONICAL_PATH_MISMATCH"),
         "artifacts_csv_mismatch_count": sum(1 for row in finding_rows if row["finding_id"].startswith("ARTIFACTS_CSV_")),
+        "canonical_store_scan_enabled": bool(scan_canonical_store),
+        "canonical_store_hash_verification_enabled": bool(
+            scan_canonical_store and verify_sha256
+        ),
+        "canonical_store_apk_count": len(canonical_store_rows),
+        "canonical_store_hash_mismatch_count": sum(
+            row["content_matches_filename"] == "no" for row in canonical_store_rows
+        ),
+        "canonical_store_invalid_zip_count": sum(
+            row["zip_structure"] == "invalid" for row in canonical_store_rows
+        ),
+        "canonical_store_missing_manifest_count": sum(
+            row["zip_structure"] == "valid" and row["android_manifest_present"] == "no"
+            for row in canonical_store_rows
+        ),
     }
     outputs = {
         "summary_json": output_root / "summary.json",
         "artifacts_csv": output_root / "artifacts.csv",
         "findings_csv": output_root / "findings.csv",
     }
+    if scan_canonical_store:
+        outputs["canonical_store_csv"] = output_root / "canonical_store.csv"
     if write_outputs:
         output_root.mkdir(parents=True, exist_ok=True)
         outputs["summary_json"].write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         _write_csv(outputs["artifacts_csv"], artifact_rows)
         _write_csv(outputs["findings_csv"], finding_rows)
+        if scan_canonical_store:
+            _write_csv(outputs["canonical_store_csv"], canonical_store_rows)
     return {
         "summary": summary,
         "outputs": {key: value.as_posix() for key, value in outputs.items()},
         "artifacts": artifact_rows,
         "findings": finding_rows,
+        "canonical_store": canonical_store_rows,
     }
+
+
+def _scan_canonical_store(
+    data_root: Path,
+    *,
+    verify_sha256: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Inspect canonical APK containers without installing, executing, or decoding code."""
+
+    rows: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    root = data_root / "store" / "apk" / "sha256"
+    for path in sorted(root.glob("*/*.apk")):
+        digest = path.stem.lower()
+        filename_valid = len(digest) == 64 and all(char in "0123456789abcdef" for char in digest)
+        expected_prefix = digest[:2] if filename_valid else ""
+        prefix_valid = filename_valid and path.parent.name.lower() == expected_prefix
+        row: dict[str, Any] = {
+            "canonical_path": path.as_posix(),
+            "sha256_from_filename": digest,
+            "filename_sha256_valid": "yes" if filename_valid else "no",
+            "prefix_matches_sha256": "yes" if prefix_valid else "no",
+            "size_bytes": 0,
+            "content_sha256": "",
+            "content_matches_filename": "not_checked",
+            "zip_structure": "unreadable",
+            "android_manifest_present": "unknown",
+            "zip_entry_count": 0,
+            "error": "",
+        }
+        if not filename_valid:
+            findings.append(
+                _finding(
+                    path,
+                    "high",
+                    "CANONICAL_STORE_INVALID_SHA256_FILENAME",
+                    "Canonical APK filename is not a lowercase SHA-256 digest.",
+                    observed=digest,
+                )
+            )
+        elif not prefix_valid:
+            findings.append(
+                _finding(
+                    path,
+                    "high",
+                    "CANONICAL_STORE_PREFIX_MISMATCH",
+                    "Canonical APK directory prefix does not match its SHA-256 filename.",
+                    expected=expected_prefix,
+                    observed=path.parent.name,
+                    sha256=digest,
+                )
+            )
+        try:
+            resolved = path.resolve(strict=True)
+            row["size_bytes"] = resolved.stat().st_size
+            if verify_sha256:
+                actual_digest = _sha256(resolved)
+                row["content_sha256"] = actual_digest
+                if not filename_valid:
+                    row["content_matches_filename"] = "not_applicable"
+                elif actual_digest == digest:
+                    row["content_matches_filename"] = "yes"
+                else:
+                    row["content_matches_filename"] = "no"
+                    findings.append(
+                        _finding(
+                            path,
+                            "critical",
+                            "CANONICAL_STORE_BYTE_HASH_MISMATCH",
+                            "Canonical APK bytes do not match the content-addressed filename.",
+                            expected=digest,
+                            observed=actual_digest,
+                            sha256=digest,
+                        )
+                    )
+            with zipfile.ZipFile(resolved) as archive:
+                names = archive.namelist()
+            row["zip_structure"] = "valid"
+            row["zip_entry_count"] = len(names)
+            row["android_manifest_present"] = (
+                "yes" if "AndroidManifest.xml" in names else "no"
+            )
+            if "AndroidManifest.xml" not in names:
+                findings.append(
+                    _finding(
+                        path,
+                        "high",
+                        "CANONICAL_APK_MANIFEST_MISSING",
+                        "Canonical APK ZIP has no AndroidManifest.xml member.",
+                        sha256=digest if filename_valid else "",
+                    )
+                )
+        except (FileNotFoundError, OSError, zipfile.BadZipFile) as exc:
+            row["zip_structure"] = "invalid"
+            row["android_manifest_present"] = "unknown"
+            row["error"] = f"{type(exc).__name__}: {exc}"[:500]
+            findings.append(
+                _finding(
+                    path,
+                    "high",
+                    "CANONICAL_APK_ZIP_STRUCTURE_INVALID",
+                    f"Canonical APK is not a structurally readable ZIP container: {exc}",
+                    sha256=digest if filename_valid else "",
+                )
+            )
+        rows.append(row)
+    return rows, findings
 
 
 def _iter_library_manifests(data_root: Path) -> Iterable[Path]:
@@ -439,6 +587,7 @@ def main(argv: list[str] | None = None) -> int:
         output_root=args.output_root,
         stamp=args.stamp,
         verify_sha256=args.verify_sha256,
+        scan_canonical_store=args.scan_canonical_store,
     )
     if args.json:
         print(json.dumps({"summary": report["summary"], "outputs": report["outputs"]}, indent=2, sort_keys=True))

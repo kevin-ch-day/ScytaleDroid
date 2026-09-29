@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from hashlib import sha256
 from pathlib import Path
 
@@ -374,6 +375,116 @@ def test_apk_library_integrity_verifier_reports_artifacts_csv_drift(tmp_path: Pa
     assert report["summary"]["status"] == "WARN"
     assert report["summary"]["artifacts_csv_mismatch_count"] == 1
     assert any(row["finding_id"] == "ARTIFACTS_CSV_ROW_MISMATCH" for row in report["findings"])
+
+
+def test_apk_library_integrity_verifier_scans_unindexed_canonical_store_apks(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "repo" / "data"
+    valid_bytes = tmp_path / "valid.apk"
+    with zipfile.ZipFile(valid_bytes, "w") as archive:
+        archive.writestr("AndroidManifest.xml", b"manifest")
+    valid_digest = sha256(valid_bytes.read_bytes()).hexdigest()
+    valid_path = _canonical_path(data, valid_digest)
+    valid_path.parent.mkdir(parents=True, exist_ok=True)
+    valid_path.write_bytes(valid_bytes.read_bytes())
+
+    invalid_bytes = b"PK\x03\x04truncated-without-central-directory"
+    invalid_digest = sha256(invalid_bytes).hexdigest()
+    invalid_path = _canonical_path(data, invalid_digest)
+    invalid_path.parent.mkdir(parents=True, exist_ok=True)
+    invalid_path.write_bytes(invalid_bytes)
+
+    report = verifier.build_report(
+        data_root=data,
+        write_outputs=False,
+        scan_canonical_store=True,
+    )
+
+    assert report["summary"]["status"] == "BLOCKED"
+    assert report["summary"]["canonical_store_apk_count"] == 2
+    assert report["summary"]["canonical_store_hash_verification_enabled"] is False
+    assert report["summary"]["canonical_store_hash_mismatch_count"] == 0
+    assert report["summary"]["canonical_store_invalid_zip_count"] == 1
+    assert report["summary"]["canonical_store_missing_manifest_count"] == 0
+    assert "canonical_store_csv" in report["outputs"]
+    assert any(
+        row["finding_id"] == "CANONICAL_APK_ZIP_STRUCTURE_INVALID"
+        and row["sha256"] == invalid_digest
+        for row in report["findings"]
+    )
+
+
+def test_apk_library_integrity_verifier_canonical_store_scan_is_opt_in(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "repo" / "data"
+    invalid_bytes = b"not-an-apk"
+    digest = sha256(invalid_bytes).hexdigest()
+    path = _canonical_path(data, digest)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(invalid_bytes)
+
+    report = verifier.build_report(data_root=data, write_outputs=False)
+
+    assert report["summary"]["status"] == "OK"
+    assert report["summary"]["canonical_store_scan_enabled"] is False
+    assert report["summary"]["canonical_store_apk_count"] == 0
+    assert "canonical_store_csv" not in report["outputs"]
+
+
+def test_apk_library_integrity_verifier_hashes_canonical_store_when_requested(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "repo" / "data"
+    valid_bytes = tmp_path / "valid.apk"
+    with zipfile.ZipFile(valid_bytes, "w") as archive:
+        archive.writestr("AndroidManifest.xml", b"manifest")
+    incorrect_digest = "0" * 64
+    path = _canonical_path(data, incorrect_digest)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(valid_bytes.read_bytes())
+
+    report = verifier.build_report(
+        data_root=data,
+        write_outputs=False,
+        verify_sha256=True,
+        scan_canonical_store=True,
+    )
+
+    assert report["summary"]["status"] == "BLOCKED"
+    assert report["summary"]["canonical_store_hash_verification_enabled"] is True
+    assert report["summary"]["canonical_store_hash_mismatch_count"] == 1
+    assert report["canonical_store"][0]["content_matches_filename"] == "no"
+    assert any(
+        row["finding_id"] == "CANONICAL_STORE_BYTE_HASH_MISMATCH"
+        and row["expected"] == incorrect_digest
+        for row in report["findings"]
+    )
+
+
+def test_apk_library_integrity_verifier_does_not_call_invalid_filename_a_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "repo" / "data"
+    path = data / "store" / "apk" / "sha256" / "aa" / "not-a-hash.apk"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("AndroidManifest.xml", b"manifest")
+
+    report = verifier.build_report(
+        data_root=data,
+        write_outputs=False,
+        verify_sha256=True,
+        scan_canonical_store=True,
+    )
+
+    assert report["summary"]["canonical_store_hash_mismatch_count"] == 0
+    assert report["canonical_store"][0]["content_matches_filename"] == "not_applicable"
+    assert any(
+        row["finding_id"] == "CANONICAL_STORE_INVALID_SHA256_FILENAME"
+        for row in report["findings"]
+    )
 
 
 def test_logical_path_repair_rewrites_absolute_cold_manifest_path(tmp_path: Path) -> None:
