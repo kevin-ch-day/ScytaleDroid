@@ -20,15 +20,11 @@ from typing import Any
 METRIC_METHOD_V1 = "v1"
 METRIC_METHOD_V2 = "v2"
 
-_UNGUARDED_FINDING_PREFIXES = (
+_NO_GUARD_FINDING_PREFIXES = (
     "ipc_activity_open_",
     "ipc_activity-alias_open_",
     "ipc_service_open_",
     "ipc_receiver_open_",
-    "ipc_activity_permission_weak_",
-    "ipc_activity-alias_permission_weak_",
-    "ipc_service_weak_permission_",
-    "ipc_receiver_weak_permission_",
     "ipc_provider_world_",
     "ipc_provider_unprotected_read_",
     "ipc_provider_unprotected_write_",
@@ -36,14 +32,43 @@ _UNGUARDED_FINDING_PREFIXES = (
     "provider_unprotected_read_",
     "provider_unprotected_write_",
 )
+_WEAK_GUARD_FINDING_PREFIXES = (
+    "ipc_activity_weak_permission_",
+    "ipc_activity-alias_weak_permission_",
+    "ipc_service_weak_permission_",
+    "ipc_receiver_weak_permission_",
+    "ipc_provider_permission_weak_",
+)
 
-_KIND_PREFIXES = (
-    ("ipc_activity-alias_", "activity_alias"),
-    ("ipc_activity_", "activity"),
-    ("ipc_service_", "service"),
-    ("ipc_receiver_", "receiver"),
-    ("ipc_provider_", "provider"),
-    ("provider_", "provider"),
+_COMPONENT_FINDING_PREFIXES = (
+    ("ipc_activity-alias_open_", "activity_alias"),
+    ("ipc_activity-alias_weak_permission_", "activity_alias"),
+    ("ipc_activity-alias_unknown_permission_", "activity_alias"),
+    ("ipc_activity-alias_permission_", "activity_alias"),
+    ("ipc_activity_open_", "activity"),
+    ("ipc_activity_weak_permission_", "activity"),
+    ("ipc_activity_unknown_permission_", "activity"),
+    ("ipc_activity_permission_", "activity"),
+    ("ipc_service_open_", "service"),
+    ("ipc_service_weak_permission_", "service"),
+    ("ipc_service_unknown_permission_", "service"),
+    ("ipc_service_permission_", "service"),
+    ("ipc_receiver_open_", "receiver"),
+    ("ipc_receiver_weak_permission_", "receiver"),
+    ("ipc_receiver_unknown_permission_", "receiver"),
+    ("ipc_receiver_permission_", "receiver"),
+    ("ipc_provider_world_", "provider"),
+    ("ipc_provider_unprotected_read_", "provider"),
+    ("ipc_provider_unprotected_write_", "provider"),
+    ("ipc_provider_permission_weak_", "provider"),
+    ("ipc_provider_permission_unknown_", "provider"),
+    ("ipc_provider_permission_custom_", "provider"),
+    ("ipc_provider_permission_", "provider"),
+    ("provider_world_", "provider"),
+    ("provider_unprotected_read_", "provider"),
+    ("provider_unprotected_write_", "provider"),
+    ("provider_path_acl_", "provider"),
+    ("provider_uri_perms_", "provider"),
 )
 
 
@@ -110,6 +135,8 @@ def component_exposure_from_findings_v2(findings: Sequence[Mapping[str, Any]]) -
         "provider": set(),
     }
     unguarded: set[tuple[str, str]] = set()
+    no_guard: set[tuple[str, str]] = set()
+    weak_guard: set[tuple[str, str]] = set()
     used_rule_ids = 0
     used_title_fallback = 0
     for row in findings:
@@ -121,7 +148,12 @@ def component_exposure_from_findings_v2(findings: Sequence[Mapping[str, Any]]) -
         else:
             used_title_fallback += 1
         exported.setdefault(kind, set()).add(name)
-        if _is_unguarded_v2(row):
+        guard_state = _guard_state_v2(row)
+        if guard_state == "none":
+            no_guard.add((kind, name))
+            unguarded.add((kind, name))
+        elif guard_state == "weak":
+            weak_guard.add((kind, name))
             unguarded.add((kind, name))
     return {
         "exported_activities": len(exported["activity"]),
@@ -130,6 +162,8 @@ def component_exposure_from_findings_v2(findings: Sequence[Mapping[str, Any]]) -
         "exported_receivers": len(exported["receiver"]),
         "exported_providers": len(exported["provider"]),
         "unguarded_ipc_components": len(unguarded),
+        "ipc_components_without_permission_guard": len(no_guard),
+        "ipc_components_with_weak_permission_guard": len(weak_guard),
         "identity_source_rule_id_count": used_rule_ids,
         "identity_source_title_fallback_count": used_title_fallback,
     }
@@ -137,22 +171,11 @@ def component_exposure_from_findings_v2(findings: Sequence[Mapping[str, Any]]) -
 
 def _component_identity_v2(row: Mapping[str, Any]) -> tuple[str | None, str, bool]:
     token = str(row.get("finding_id") or row.get("rule_id") or "").strip()
-    for prefix, kind in _KIND_PREFIXES:
+    for prefix, kind in _COMPONENT_FINDING_PREFIXES:
         if token.startswith(prefix):
-            name = token[len(prefix) :]
-            for extra in (
-                "open_",
-                "permission_weak_",
-                "weak_permission_",
-                "permission_",
-                "world_",
-                "unprotected_read_",
-                "unprotected_write_",
-            ):
-                if name.startswith(extra):
-                    name = name[len(extra) :]
-                    break
-            return kind, name, True
+            return kind, token[len(prefix) :], True
+    if token:
+        return None, "", False
     title = str(row.get("title") or "").lower()
     if "exported activity alias" in title:
         return "activity_alias", str(row.get("title") or ""), False
@@ -167,12 +190,20 @@ def _component_identity_v2(row: Mapping[str, Any]) -> tuple[str | None, str, boo
     return None, "", False
 
 
-def _is_unguarded_v2(row: Mapping[str, Any]) -> bool:
+def _guard_state_v2(row: Mapping[str, Any]) -> str | None:
     token = str(row.get("finding_id") or row.get("rule_id") or "").strip()
-    if any(token.startswith(prefix) for prefix in _UNGUARDED_FINDING_PREFIXES):
-        return True
+    if any(token.startswith(prefix) for prefix in _NO_GUARD_FINDING_PREFIXES):
+        return "none"
+    if any(token.startswith(prefix) for prefix in _WEAK_GUARD_FINDING_PREFIXES):
+        return "weak"
+    if token:
+        return None
     title = str(row.get("title") or "").lower()
-    return "without permission" in title or "unprotected" in title or "weak guard" in title
+    if "without permission" in title or "unprotected" in title:
+        return "none"
+    if "weak guard" in title or "weak permission guard" in title:
+        return "weak"
+    return None
 
 
 def aggregate_dynamic_metrics_v2(

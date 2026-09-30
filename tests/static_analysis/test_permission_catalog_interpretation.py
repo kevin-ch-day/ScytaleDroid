@@ -3,6 +3,22 @@ from __future__ import annotations
 from scytaledroid.StaticAnalysis.modules.permissions import catalog
 
 
+def test_numeric_android_protection_levels_use_base_mask() -> None:
+    expected = {
+        "0x00000000": ("normal", "weak"),
+        "0x00000001": ("dangerous", "dangerous"),
+        "0x00000002": ("signature", "signature"),
+        "0x00000003": ("signatureorsystem", "signature"),
+        "0x00000012": ("signature", "signature"),
+        "2": ("signature", "signature"),
+        "0x0000000f": (None, "unknown"),
+    }
+    for raw, (base, strength) in expected.items():
+        descriptor = catalog.PermissionDescriptor("com.example.CUSTOM", (raw,))
+        assert descriptor.base_level() == base
+        assert descriptor.guard_strength() == strength
+
+
 def _install_yaml_paths(tmp_path, monkeypatch) -> None:
     source = tmp_path / "framework_permissions.yaml"
     source.write_text(

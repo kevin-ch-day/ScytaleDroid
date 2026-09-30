@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
 from xml.etree import ElementTree
 
 from scytaledroid.StaticAnalysis.core.findings import Badge
@@ -8,9 +10,14 @@ from scytaledroid.StaticAnalysis.core.manifest_utils import (
     collect_exported_components,
 )
 from scytaledroid.StaticAnalysis.detectors.components import (
+    IpcExposureDetector,
     _build_metrics,
     _classify_component,
     iter_manifest_components,
+)
+from scytaledroid.StaticAnalysis.detectors.provider_acl import (
+    ProviderAclDetector,
+    _build_provider_snapshot,
 )
 from scytaledroid.StaticAnalysis.detectors.provider_acl import (
     _collect_providers as collect_acl_providers,
@@ -101,6 +108,56 @@ def test_exported_provider_read_write_permissions_are_recognized_as_guard() -> N
     assert metrics["permission_guard_strength"] == {"strong": 1}
 
 
+def test_numeric_signature_custom_permission_is_not_reported_as_weak() -> None:
+    manifest = _manifest(
+        '<activity android:name="com.example.Secure" android:exported="true" '
+        'android:permission="com.example.READ" />'
+        '<provider android:name="com.example.SecureProvider" '
+        'android:authorities="com.example.secure" android:exported="true" '
+        'android:permission="com.example.READ" />'
+    )
+    components = tuple(iter_manifest_components(manifest))
+    levels = {"com.example.READ": ("0x00000002",)}
+    findings = [
+        _classify_component(component, protection_levels=levels, catalog={})
+        for component in components
+    ]
+    assert all(finding is not None and finding.status is Badge.INFO for finding in findings)
+    assert _build_metrics(
+        components, None, protection_levels=levels, catalog={}
+    )["permission_guard_strength"] == {"strong": 2}
+    provider = collect_acl_providers(manifest)[0]
+    snapshot = _build_provider_snapshot(provider, protection_levels=levels, catalog={})
+    assert snapshot["read_guard"] == "signature"
+    assert snapshot["write_guard"] == "signature"
+    assert snapshot["effective_guard"] == "signature"
+
+
+def test_unresolved_permission_is_kept_distinct_from_weak_guard() -> None:
+    manifest = _manifest(
+        '<service android:name="com.example.Unresolved" android:exported="true" '
+        'android:permission="com.example.MISSING" />'
+        '<provider android:name="com.example.UnresolvedProvider" '
+        'android:authorities="com.example.unresolved" android:exported="true" '
+        'android:permission="com.example.MISSING" />'
+    )
+    components = tuple(iter_manifest_components(manifest))
+    findings = [
+        _classify_component(component, protection_levels={}, catalog={})
+        for component in components
+    ]
+    assert all(finding is not None and finding.status is Badge.WARN for finding in findings)
+    assert all("unknown" in finding.finding_id for finding in findings if finding)
+    assert _build_metrics(
+        components, None, protection_levels={}, catalog={}
+    )["permission_guard_strength"] == {"unknown": 2}
+    provider = collect_acl_providers(manifest)[0]
+    snapshot = _build_provider_snapshot(provider, protection_levels={}, catalog={})
+    assert snapshot["read_guard"] == "unknown"
+    assert snapshot["write_guard"] == "unknown"
+    assert snapshot["effective_guard"] == "unknown"
+
+
 def test_exported_provider_without_base_read_or_write_permission_still_fails() -> None:
     components = tuple(
         iter_manifest_components(
@@ -122,7 +179,8 @@ def test_exported_provider_without_base_read_or_write_permission_still_fails() -
     )
 
     assert finding is not None
-    assert finding.status is Badge.FAIL
+    assert finding.status is Badge.INFO
+    assert finding.metrics["assessment_state"] == "REVIEW_REQUIRED"
     assert "without permission" in finding.title
 
 
@@ -176,7 +234,7 @@ def test_legacy_provider_without_exported_defaults_to_exported() -> None:
 
     assert components[0].exported is True
     assert finding is not None
-    assert finding.status is Badge.FAIL
+    assert finding.status is Badge.INFO
     assert summary.providers == ("com.example.LegacyProvider",)
     assert evidence[0]["exported_effective"] is True
     assert evidence[0]["export_reason"] == "provider_default_true_legacy_sdk"
@@ -314,7 +372,7 @@ def test_provider_unprotected_write_is_exposed_when_only_read_is_guarded() -> No
         catalog={},
     )
     assert finding is not None
-    assert finding.status is Badge.FAIL
+    assert finding.status is Badge.INFO
     assert "unprotected write" in finding.title
     assert acl["com.example.ReadOnlyGuard"].read_permission == "com.example.READ"
     assert acl["com.example.ReadOnlyGuard"].write_permission is None
@@ -342,7 +400,7 @@ def test_provider_unprotected_read_is_exposed_when_only_write_is_guarded() -> No
         catalog={},
     )
     assert finding is not None
-    assert finding.status is Badge.FAIL
+    assert finding.status is Badge.INFO
     assert "unprotected read" in finding.title
 
 
@@ -369,6 +427,46 @@ def test_provider_general_permission_protects_both_directions() -> None:
     assert components[0].write_permission == "com.example.READ"
     assert finding is not None
     assert finding.status is Badge.INFO
+
+
+def test_uri_grants_without_general_permission_do_not_imply_acl_bypass() -> None:
+    from scytaledroid.StaticAnalysis.detectors.provider_acl import _classify_provider
+
+    manifest = _manifest(
+        '<provider android:name="com.example.GrantProvider" '
+        'android:authorities="com.example.grant" android:exported="true" '
+        'android:grantUriPermissions="true" '
+        'android:readPermission="com.example.READ" '
+        'android:writePermission="com.example.WRITE" />'
+    )
+    provider = collect_acl_providers(manifest)[0]
+    levels = {
+        "com.example.READ": ("signature",),
+        "com.example.WRITE": ("signature",),
+    }
+    assert provider.grant_uri_permissions is True
+    assert _classify_provider(provider, protection_levels=levels, catalog={}) is None
+    snapshot = _build_provider_snapshot(provider, protection_levels=levels, catalog={})
+    assert snapshot["effective_guard"] == "signature"
+
+
+def test_manifest_only_provider_exposure_is_info_in_both_detectors() -> None:
+    manifest = _manifest(
+        '<provider android:name="com.example.OpenProvider" '
+        'android:authorities="com.example.open" android:exported="true" />'
+    )
+    context = SimpleNamespace(
+        apk_path=Path("dummy.apk"),
+        manifest_root=manifest,
+        permissions=SimpleNamespace(protection_levels={}, declared=(), custom=()),
+        permission_catalog={},
+    )
+    for detector in (IpcExposureDetector(), ProviderAclDetector()):
+        result = detector.run(context)
+        assert result.status is Badge.INFO
+        assert len(result.findings) == 1
+        assert result.findings[0].status is Badge.INFO
+        assert result.findings[0].metrics["assessment_state"] == "REVIEW_REQUIRED"
 
 
 def test_storage_surface_provider_parser_uses_effective_exported_state() -> None:

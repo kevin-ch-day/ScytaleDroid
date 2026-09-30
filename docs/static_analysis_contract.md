@@ -226,17 +226,15 @@ Each detector owns a specific concern area and returns a `DetectorResult` meetin
   canary), and ABI support. `[INFO]` by default; `[WARN]` on missing hardening.
 - **obfuscation.py:** Obfuscation depth, anti-analysis fingerprints, reflective
   spikes. `[INFO]`/`[WARN]` depending on aggressiveness.
-- **correlation/`detector.py`:** Combines prior `DetectorResult`s into
-  normalised P0/P1 `Finding` objects using deterministic rules:
-  1. `P0_CLEARtext_VIABLE`: `usesCleartextTraffic` and ≥1 HTTP endpoint and `INTERNET` permission.
-  2. `P0_DATA_EXFIL_IPC`: Dangerous permission (contacts/location) with unguarded exported component (activity/provider).
-  3. `P0_HARDCODED_CRED_AT_RISK`: Sensitive secret type with matching endpoint family.
-  4. `P1_BACKUP_EXTRACTABLE_SECRETS`: `allowBackup` with plaintext storage hit.
-  5. `P1_WEAK_CRYPTO_SENSITIVE_FLOW`: AES-ECB or static IV CBC near token/password usage.
-  6. `P1_DYNAMIC_LOADING_WITH_DANGEROUS_PERMS`: Dynamic class loading with dangerous permissions.
-  7. `P1_PROVIDER_URI_GRANT_MISUSE`: Exported provider with `grantUriPermissions` but no read/write guards.
-
-Findings must be sorted with all `P0` (alphabetical by title) followed by `P1` (alphabetical). No duplicates.
+- **correlation/`detector.py`:** Compares the current report with a prior
+  report for the same app/version, adds split-composition findings, and emits a
+  descriptive risk-profile finding. The risk profile is normalised to `[WARN]`
+  if its scorer returns `[FAIL]`; it is not a policy failure by itself. A
+  `corr_cleartext_enabled` policy failure requires a prior baseline showing
+  cleartext disabled and a current report showing it enabled. Missing baseline
+  yields `not_applicable:baseline_missing`. These findings are observations and
+  heuristics, not validated exploitability claims. The older P0/P1 composite
+  rule list was a proposal and is not implemented by this detector.
 
 ## 5. Rendering (`cli/sections.py`)
 

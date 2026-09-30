@@ -234,7 +234,7 @@ def _permission_strength(
         return "none", levels
     if strength == "signature":
         return "strong", tuple(levels)
-    if strength in {"dangerous", "weak", "unknown"}:
+    if strength in {"dangerous", "weak"}:
         return "weak", tuple(levels)
     return strength, tuple(levels)
 
@@ -279,6 +279,8 @@ def _provider_permission_guard(
         return "strong", "; ".join(display)
     if any(strength == "weak" for strength in strengths):
         return "weak", "; ".join(display)
+    if any(strength == "unknown" for strength in strengths):
+        return "unknown", "; ".join(display)
     return "custom", "; ".join(display)
 
 
@@ -302,49 +304,52 @@ def _classify_component(
             return Finding(
                 finding_id=f"ipc_provider_world_{base_id}",
                 title=f"Exported provider without permission — {component.name}",
-                severity_gate=SeverityLevel.P0,
+                severity_gate=SeverityLevel.P2,
                 category_masvs=MasvsCategory.PLATFORM,
-                status=Badge.FAIL,
+                status=Badge.INFO,
                 because=(
-                    "Content provider is exported without read/write permissions, allowing"
-                    " external processes to query data."
+                    "Content provider is exported without manifest read/write guards."
+                    " Reachable data and runtime caller checks require review."
                 ),
                 remediate=(
                     "Declare readPermission and writePermission or mark the provider"
                     " as private (exported=false)."
                 ),
+                metrics={"manifest_guard": "none", "assessment_state": "REVIEW_REQUIRED"},
             )
         if not read_perm:
             return Finding(
                 finding_id=f"ipc_provider_unprotected_read_{base_id}",
                 title=f"Exported provider with unprotected read — {component.name}",
-                severity_gate=SeverityLevel.P0,
+                severity_gate=SeverityLevel.P2,
                 category_masvs=MasvsCategory.PLATFORM,
-                status=Badge.FAIL,
+                status=Badge.INFO,
                 because=(
-                    f"Provider {component.name} protects writes but leaves the read"
-                    " direction unprotected, allowing other apps to query content."
+                    f"Provider {component.name} declares a write guard but no read"
+                    " guard. Query behavior and runtime caller checks require review."
                 ),
                 remediate=(
                     "Set android:readPermission (or a general android:permission) for the"
                     " read direction, or mark the provider private."
                 ),
+                metrics={"manifest_guard": "read_missing", "assessment_state": "REVIEW_REQUIRED"},
             )
         if not write_perm:
             return Finding(
                 finding_id=f"ipc_provider_unprotected_write_{base_id}",
                 title=f"Exported provider with unprotected write — {component.name}",
-                severity_gate=SeverityLevel.P0,
+                severity_gate=SeverityLevel.P2,
                 category_masvs=MasvsCategory.PLATFORM,
-                status=Badge.FAIL,
+                status=Badge.INFO,
                 because=(
-                    f"Provider {component.name} protects reads but leaves the write"
-                    " direction unprotected, allowing other apps to modify content."
+                    f"Provider {component.name} declares a read guard but no write"
+                    " guard. Mutation behavior and runtime caller checks require review."
                 ),
                 remediate=(
                     "Set android:writePermission (or a general android:permission) for the"
                     " write direction, or mark the provider private."
                 ),
+                metrics={"manifest_guard": "write_missing", "assessment_state": "REVIEW_REQUIRED"},
             )
 
         provider_permissions = tuple(
@@ -376,17 +381,35 @@ def _classify_component(
             return Finding(
                 finding_id=f"ipc_provider_permission_weak_{base_id}",
                 title=f"Weak guard on exported provider — {component.name}",
-                severity_gate=SeverityLevel.P0,
+                severity_gate=SeverityLevel.P2,
                 category_masvs=MasvsCategory.PLATFORM,
-                status=Badge.FAIL,
+                status=Badge.INFO,
                 because=(
                     f"Provider {component.name} is exported but guarded by"
-                    f" {permission_display}, allowing broad callers."
+                    f" {permission_display}. Sensitive operations and runtime"
+                    " caller checks require review."
                 ),
                 remediate=(
                     "Switch the provider permission to signature or signatureOrSystem"
                     " or make the component private."
                 ),
+                metrics={
+                    "protection_level": provider_guard,
+                    "assessment_state": "REVIEW_REQUIRED",
+                },
+            )
+        if provider_guard == "unknown":
+            return Finding(
+                finding_id=f"ipc_provider_permission_unknown_{base_id}",
+                title=f"Unresolved permission guard on exported provider — {component.name}",
+                severity_gate=SeverityLevel.P2,
+                category_masvs=MasvsCategory.PLATFORM,
+                status=Badge.WARN,
+                because=(
+                    f"Provider {component.name} is exported with {permission_display};"
+                    " the permission protection level could not be resolved."
+                ),
+                remediate="Verify the permission declaration and its protection level.",
                 metrics={"protection_level": provider_guard},
             )
         return Finding(
@@ -410,17 +433,19 @@ def _classify_component(
         return Finding(
             finding_id=f"ipc_{component.component_type}_open_{base_id}",
             title=f"Exported {component_label} without permission",
-            severity_gate=SeverityLevel.P1,
+            severity_gate=SeverityLevel.P2,
             category_masvs=MasvsCategory.PLATFORM,
-            status=Badge.WARN,
+            status=Badge.INFO,
             because=(
                 f"{component_label.title()} {component.name} is exported but does not"
-                " declare android:permission."
+                " declare android:permission. Sensitive behavior and runtime caller"
+                " checks require review."
             ),
             remediate=(
                 "Restrict the component with signature-level permissions or mark it"
                 " non-exported unless explicitly required."
             ),
+            metrics={"manifest_guard": "none", "assessment_state": "REVIEW_REQUIRED"},
         )
 
     strength, levels = _permission_strength(
@@ -452,21 +477,39 @@ def _classify_component(
         return Finding(
             finding_id=f"ipc_{component.component_type}_weak_permission_{base_id}",
             title=f"Weak permission guard on exported {component_label}",
-            severity_gate=SeverityLevel.P1,
+            severity_gate=SeverityLevel.P2,
             category_masvs=MasvsCategory.PLATFORM,
-            status=Badge.WARN,
+            status=Badge.INFO,
             because=(
                 f"{component_label.title()} {component.name} uses {permission}"
-                f" (protectionLevel={level_display}), which is insufficient for"
-                " exported components."
+                f" (protectionLevel={level_display}). Whether this grants access to"
+                " sensitive behavior requires review."
             ),
             remediate=(
                 "Protect the component with a signature-level permission or mark"
                 " it non-exported."
             ),
-            metrics={"protection_level": level_display},
+            metrics={
+                "protection_level": level_display,
+                "assessment_state": "REVIEW_REQUIRED",
+            },
         )
 
+    if strength == "unknown":
+        return Finding(
+            finding_id=f"ipc_{component.component_type}_unknown_permission_{base_id}",
+            title=f"Unresolved permission guard on exported {component_label}",
+            severity_gate=SeverityLevel.P2,
+            category_masvs=MasvsCategory.PLATFORM,
+            status=Badge.WARN,
+            because=(
+                f"{component_label.title()} {component.name} uses {permission}"
+                f" (protectionLevel={level_display}); its protection level could not"
+                " be resolved."
+            ),
+            remediate="Verify the permission declaration and its protection level.",
+            metrics={"protection_level": level_display},
+        )
     return Finding(
         finding_id=f"ipc_{component.component_type}_permission_{base_id}",
         title=f"Exported {component_label} guarded by {permission}",
@@ -558,6 +601,8 @@ class IpcExposureDetector(BaseDetector):
         badge = Badge.OK
         if any(f.status in {Badge.FAIL, Badge.WARN} for f in findings):
             badge = Badge.FAIL if any(f.status is Badge.FAIL for f in findings) else Badge.WARN
+        elif findings:
+            badge = Badge.INFO
 
         return make_detector_result(
             detector_id=self.detector_id,

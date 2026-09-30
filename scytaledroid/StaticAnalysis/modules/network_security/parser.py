@@ -6,11 +6,20 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from xml.etree import ElementTree
 
+from androguard.core.axml import AXMLPrinter
 from scytaledroid.StaticAnalysis._androguard import APK
 
 from .models import DomainPolicy, NetworkSecurityPolicy
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
+
+
+def _attribute(element: ElementTree.Element, name: str) -> str | None:
+    """NSC uses unprefixed XML attributes; accept decoded prefixed variants too."""
+
+    if name in element.attrib:
+        return element.get(name)
+    return element.get(f"{_ANDROID_NS}{name}")
 
 
 def extract_network_security_policy(
@@ -35,6 +44,7 @@ def extract_network_security_policy(
             trust_user_certificates=False,
             domain_policies=tuple(),
             raw_xml_hash=None,
+            parse_valid=False,
         )
 
     if not raw_bytes:
@@ -45,11 +55,11 @@ def extract_network_security_policy(
             trust_user_certificates=False,
             domain_policies=tuple(),
             raw_xml_hash=None,
+            parse_valid=False,
         )
 
-    try:
-        root = ElementTree.fromstring(raw_bytes)
-    except ElementTree.ParseError:
+    root = _parse_xml_root(raw_bytes)
+    if root is None or root.tag != "network-security-config":
         return NetworkSecurityPolicy(
             source_path=resolved_path,
             base_cleartext=None,
@@ -57,9 +67,10 @@ def extract_network_security_policy(
             trust_user_certificates=False,
             domain_policies=tuple(),
             raw_xml_hash=hashlib.sha256(raw_bytes).hexdigest(),
+            parse_valid=False,
         )
 
-    base_cleartext = _coerce_bool(root.get(f"{_ANDROID_NS}cleartextTrafficPermitted"))
+    base_cleartext = _coerce_bool(_attribute(root, "cleartextTrafficPermitted"))
     trust_user_certificates = False
     base_trust_anchors: tuple[str, ...] = tuple()
 
@@ -68,7 +79,7 @@ def extract_network_security_policy(
     base_config = root.find("base-config")
     if base_config is not None:
         base_cleartext = _coerce_bool(
-            base_config.get(f"{_ANDROID_NS}cleartextTrafficPermitted"),
+            _attribute(base_config, "cleartextTrafficPermitted"),
             default=base_cleartext,
         )
         base_trust_anchors = _collect_trust_anchors(base_config)
@@ -78,7 +89,7 @@ def extract_network_security_policy(
     debug_cleartext = None
     if debug_overrides is not None:
         debug_cleartext = _coerce_bool(
-            debug_overrides.get(f"{_ANDROID_NS}cleartextTrafficPermitted")
+            _attribute(debug_overrides, "cleartextTrafficPermitted")
         )
         if debug_cleartext is None:
             debug_cleartext = base_cleartext
@@ -110,7 +121,25 @@ def extract_network_security_policy(
         base_trust_anchors=base_trust_anchors,
         domain_policies=tuple(domain_configs),
         raw_xml_hash=xml_hash,
+        parse_valid=True,
     )
+
+
+def _parse_xml_root(raw_bytes: bytes) -> ElementTree.Element | None:
+    try:
+        return ElementTree.fromstring(raw_bytes)
+    except ElementTree.ParseError:
+        # APK resources are commonly Android binary XML rather than text XML.
+        if not raw_bytes.startswith(b"\x03\x00\x08\x00"):
+            return None
+    try:
+        printer = AXMLPrinter(raw_bytes)
+        if printer.is_valid():
+            return ElementTree.fromstring(printer.get_buff())
+    except Exception:
+        # Corrupt resources are evidence of uncertainty, not a scan failure.
+        pass
+    return None
 
 
 def _resolve_resource_path(reference: str | None) -> str | None:
@@ -151,7 +180,7 @@ def _collect_trust_anchors(element: ElementTree.Element) -> tuple[str, ...]:
         for child in anchor:
             tag = child.tag.rsplit("}", 1)[-1] if "}" in child.tag else child.tag
             if tag == "certificates":
-                src = (child.get(f"{_ANDROID_NS}src") or "").strip()
+                src = (_attribute(child, "src") or "").strip()
                 if src:
                     anchors.append(src)
     return tuple(anchors)
@@ -170,7 +199,7 @@ def _parse_domain_config(
     inherited_anchors: Sequence[str],
 ) -> list[DomainPolicy]:
     cleartext = _coerce_bool(
-        element.get(f"{_ANDROID_NS}cleartextTrafficPermitted"),
+        _attribute(element, "cleartextTrafficPermitted"),
         default=base_cleartext,
     )
     anchors = _collect_trust_anchors(element)
@@ -179,23 +208,19 @@ def _parse_domain_config(
     user_certificates = _anchors_allow_user(anchors)
     pin_sets = _collect_pin_sets(element)
 
-    domains: list[str] = []
-    include_subdomains = False
+    policies: list[DomainPolicy] = []
     for domain in element.findall("domain"):
         name = (domain.text or "").strip()
         if not name:
             continue
-        domains.append(name)
-        include_subdomains = include_subdomains or _coerce_bool(
-            domain.get(f"{_ANDROID_NS}includeSubdomains"), default=False
-        )
-
-    policies: list[DomainPolicy] = []
-    if domains:
         policies.append(
             DomainPolicy(
-                domains=tuple(domains),
-                include_subdomains=include_subdomains,
+                domains=(name,),
+                include_subdomains=bool(
+                    _coerce_bool(
+                        _attribute(domain, "includeSubdomains"), default=False
+                    )
+                ),
                 cleartext_permitted=cleartext,
                 user_certificates_allowed=user_certificates,
                 pinned_certificates=tuple(pin_sets),
@@ -213,12 +238,12 @@ def _collect_pin_sets(element: ElementTree.Element) -> list[Mapping[str, object]
     pin_sets: list[Mapping[str, object]] = []
     for pin_set in element.findall("pin-set"):
         entry: dict[str, object] = {}
-        expiration = (pin_set.get(f"{_ANDROID_NS}expiration") or "").strip()
+        expiration = (_attribute(pin_set, "expiration") or "").strip()
         if expiration:
             entry["expiration"] = expiration
         pins: list[Mapping[str, str]] = []
         for pin in pin_set.findall("pin"):
-            digest = (pin.get(f"{_ANDROID_NS}digest") or "").strip()
+            digest = (_attribute(pin, "digest") or "").strip()
             value = (pin.text or "").strip()
             if not digest or not value:
                 continue

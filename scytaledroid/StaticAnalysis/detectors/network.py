@@ -40,54 +40,109 @@ def _is_allowlisted_host(host: str) -> bool:
     return any(host.endswith(suffix) for suffix in _ALLOWLIST_HOST_SUFFIXES)
 
 
-def _nsc_allows_cleartext(policy: NetworkSecurityPolicy | None, host: str) -> bool:
-    if policy is None:
-        return True
+def _target_sdk_int(manifest_summary: object) -> int | None:
+    raw = getattr(manifest_summary, "target_sdk", None)
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _nsc_allows_cleartext(
+    policy: NetworkSecurityPolicy | None,
+    host: str,
+    *,
+    target_sdk: int | None = None,
+    uses_cleartext_traffic: bool | None = None,
+) -> bool:
+    return _cleartext_policy_state(
+        policy,
+        host,
+        target_sdk=target_sdk,
+        uses_cleartext_traffic=uses_cleartext_traffic,
+    ) == "allowed"
+
+
+def _cleartext_policy_state(
+    policy: NetworkSecurityPolicy | None,
+    host: str,
+    *,
+    target_sdk: int | None = None,
+    uses_cleartext_traffic: bool | None = None,
+) -> str:
+    platform_default = None if target_sdk is None else target_sdk < 28
+    if policy is None or policy.source_path is None:
+        if target_sdk is not None and target_sdk >= 38:
+            allowed = platform_default
+        else:
+            allowed = platform_default if uses_cleartext_traffic is None else uses_cleartext_traffic
+        return "unknown" if allowed is None else "allowed" if allowed else "blocked"
+    if policy.parse_valid is False:
+        return "unknown"
+    if (
+        policy.raw_xml_hash is None
+        and policy.base_cleartext is None
+        and not policy.domain_policies
+    ):
+        return "unknown"
     if policy.base_cleartext is False:
         default_allowed = False
     elif policy.base_cleartext is True:
         default_allowed = True
     else:
-        default_allowed = True
+        default_allowed = platform_default
 
     host = host.lower()
     decision = None
+    best_domain_length = -1
     for domain_policy in policy.domain_policies:
         for domain in domain_policy.domains:
             domain = domain.lower()
             matches = host == domain or (domain_policy.include_subdomains and host.endswith(f".{domain}"))
-            if not matches:
+            if not matches or len(domain) <= best_domain_length:
                 continue
-            if domain_policy.cleartext_permitted is True:
-                return True
-            if domain_policy.cleartext_permitted is False:
-                decision = False
-            else:
-                decision = default_allowed
-    if decision is not None:
-        return decision
-    return default_allowed
+            best_domain_length = len(domain)
+            decision = (
+                domain_policy.cleartext_permitted
+                if domain_policy.cleartext_permitted is not None
+                else default_allowed
+            )
+    allowed = default_allowed if decision is None else decision
+    return "unknown" if allowed is None else "allowed" if allowed else "blocked"
 
 
 def _filter_http_matches(
     matches: Sequence[EndpointMatch],
     policy: NetworkSecurityPolicy | None,
-) -> tuple[Sequence[EndpointMatch], tuple[str, ...], tuple[str, ...]]:
+    *,
+    target_sdk: int | None = None,
+    uses_cleartext_traffic: bool | None = None,
+) -> tuple[Sequence[EndpointMatch], tuple[str, ...], tuple[str, ...], Sequence[EndpointMatch]]:
     allowed: list[EndpointMatch] = []
     suppressed: set[str] = set()
     allowlisted: set[str] = set()
+    unresolved: list[EndpointMatch] = []
 
     for match in matches:
         host = match.host.lower()
         if _is_allowlisted_host(host):
             allowlisted.add(host)
             continue
-        if not _nsc_allows_cleartext(policy, host):
+        policy_state = _cleartext_policy_state(
+            policy,
+            host,
+            target_sdk=target_sdk,
+            uses_cleartext_traffic=uses_cleartext_traffic,
+        )
+        if policy_state == "blocked":
             suppressed.add(host)
+            continue
+        if policy_state == "unknown":
+            unresolved.append(match)
             continue
         allowed.append(match)
 
-    return tuple(allowed), tuple(sorted(suppressed)), tuple(sorted(allowlisted))
+    return tuple(allowed), tuple(sorted(suppressed)), tuple(sorted(allowlisted)), tuple(unresolved)
 
 
 def _hash_host(host: str) -> str:
@@ -136,6 +191,7 @@ def _summarise_surface(
     *,
     suppressed_hosts: Sequence[str] = (),
     allowlisted_hosts: Sequence[str] = (),
+    unresolved_matches: Sequence[EndpointMatch] = (),
 ) -> tuple[dict[str, object], str]:
     endpoints_line = f"http={len(http_matches)}  https={len(https_matches)}"
 
@@ -175,6 +231,11 @@ def _summarise_surface(
         surface_payload["suppressed_http_hosts"] = sorted(set(suppressed_hosts))
     if allowlisted_hosts:
         surface_payload["allowlisted_http_hosts"] = sorted(set(allowlisted_hosts))
+    if unresolved_matches:
+        surface_payload["http_literals_policy_unknown"] = len(unresolved_matches)
+        surface_payload["policy_unknown_http_hosts"] = sorted(
+            {match.host for match in unresolved_matches}
+        )
     metrics["surface"] = surface_payload
 
     if suppressed_hosts:
@@ -189,7 +250,7 @@ def _summarise_surface(
     status = "ok"
     if http_matches:
         status = "warn"
-    elif overrides:
+    elif overrides or unresolved_matches:
         status = "review"
 
     return metrics, status
@@ -449,9 +510,11 @@ class NetworkSurfaceDetector(BaseDetector):
         endpoints = extract_endpoints(index)
         tls_hits = detect_tls_keywords(index)
         http_candidates = tuple(match for match in endpoints if match.scheme == "http")
-        http_matches, suppressed_hosts, allowlisted_hosts = _filter_http_matches(
+        http_matches, suppressed_hosts, allowlisted_hosts, unresolved_matches = _filter_http_matches(
             http_candidates,
             context.network_security_policy,
+            target_sdk=_target_sdk_int(getattr(context, "manifest_summary", None)),
+            uses_cleartext_traffic=context.manifest_flags.uses_cleartext_traffic,
         )
         https_matches = tuple(match for match in endpoints if match.scheme == "https")
         metrics, status_key = _summarise_surface(
@@ -461,9 +524,10 @@ class NetworkSurfaceDetector(BaseDetector):
             context.manifest_flags,
             suppressed_hosts=suppressed_hosts,
             allowlisted_hosts=allowlisted_hosts,
+            unresolved_matches=unresolved_matches,
         )
 
-        evidence_pool: list[EndpointMatch] = list(http_matches)
+        evidence_pool: list[EndpointMatch] = list(http_matches) + list(unresolved_matches)
         for match in https_matches:
             if match not in evidence_pool:
                 evidence_pool.append(match)

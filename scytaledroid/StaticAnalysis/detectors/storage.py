@@ -61,24 +61,44 @@ def _build_findings(context: DetectorContext, key_evidence: Sequence[EvidencePoi
         findings.append(
             Finding(
                 finding_id="storage_allow_backup",
-                title="Application allows Android backup",
-                severity_gate=SeverityLevel.P1,
+                title="Android backup permitted",
+                severity_gate=SeverityLevel.P2,
                 category_masvs=MasvsCategory.STORAGE,
-                status=Badge.WARN,
-                because="android:allowBackup is true; user data may leak via adb backup.",
-                remediate="Disable backups or provide custom BackupAgent filtering secrets.",
+                status=Badge.INFO,
+                because=(
+                    "android:allowBackup is true. Backup rules and stored data determine"
+                    " whether sensitive information is included."
+                ),
+                remediate="Review backup inclusion rules and exclude sensitive data.",
             )
         )
 
     if flags.request_legacy_external_storage:
+        try:
+            legacy_target_sdk = int(context.manifest_summary.target_sdk)
+        except (TypeError, ValueError, AttributeError):
+            legacy_target_sdk = None
+        legacy_inert = legacy_target_sdk is not None and legacy_target_sdk >= 30
         findings.append(
             Finding(
                 finding_id="storage_legacy_external",
-                title="Legacy external storage requested",
-                severity_gate=SeverityLevel.P1,
+                title=(
+                    "Legacy external storage attribute present (ignored on Android 11+)"
+                    if legacy_inert
+                    else "Legacy external storage requested"
+                ),
+                severity_gate=SeverityLevel.P2 if legacy_inert else SeverityLevel.P1,
                 category_masvs=MasvsCategory.STORAGE,
-                status=Badge.WARN,
-                because="requestLegacyExternalStorage=true keeps scoped storage disabled.",
+                status=Badge.INFO if legacy_inert else Badge.WARN,
+                because=(
+                    "Android 11+ ignores requestLegacyExternalStorage for apps"
+                    " targeting API 30+."
+                    if legacy_inert
+                    else (
+                        "requestLegacyExternalStorage=true may opt out of scoped storage"
+                        " on supported older devices."
+                    )
+                ),
                 remediate="Adopt scoped storage or justify legacy flag for backwards compatibility.",
             )
         )

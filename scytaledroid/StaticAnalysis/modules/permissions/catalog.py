@@ -45,6 +45,22 @@ class PermissionDescriptor:
     def base_level(self) -> str | None:
         for token in self.protection:
             lowered = token.lower()
+            # aapt/Androguard may preserve the integer protectionLevel instead
+            # of its symbolic name. Android stores the base in the low nibble.
+            if lowered.startswith("0x") or lowered.isdecimal():
+                try:
+                    value = int(lowered, 0) if lowered.startswith("0x") else int(lowered)
+                except ValueError:
+                    continue
+                numeric_base = {
+                    0: "normal",
+                    1: "dangerous",
+                    2: "signature",
+                    3: "signatureorsystem",
+                    4: "internal",
+                }.get(value & 0xF)
+                if numeric_base is not None:
+                    return numeric_base
             if lowered in {
                 "normal",
                 "dangerous",

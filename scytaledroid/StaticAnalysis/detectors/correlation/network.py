@@ -33,9 +33,14 @@ def policy_from_payload(payload: Mapping[str, object]) -> NetworkSecurityPolicy:
                             entry.get("user_certificates_allowed", False)
                         ),
                         pinned_certificates=tuple(
-                            str(cert)
+                            dict(cert)
                             for cert in entry.get("pinned_certificates", ())
-                            if isinstance(cert, str)
+                            if isinstance(cert, Mapping)
+                        ),
+                        trust_anchors=tuple(
+                            anchor
+                            for anchor in entry.get("trust_anchors", ())
+                            if isinstance(anchor, str)
                         ),
                         source=entry.get("source"),
                     )
@@ -45,8 +50,18 @@ def policy_from_payload(payload: Mapping[str, object]) -> NetworkSecurityPolicy:
             base_cleartext=payload.get("base_cleartext"),
             debug_overrides_cleartext=payload.get("debug_overrides_cleartext"),
             trust_user_certificates=bool(payload.get("trust_user_certificates", False)),
+            base_trust_anchors=tuple(
+                anchor
+                for anchor in payload.get("base_trust_anchors", ())
+                if isinstance(anchor, str)
+            ),
             domain_policies=tuple(policies),
             raw_xml_hash=payload.get("raw_xml_hash"),
+            parse_valid=(
+                payload["parse_valid"]
+                if isinstance(payload.get("parse_valid"), bool)
+                else None
+            ),
         )
     except Exception:
         return NetworkSecurityPolicy.empty()

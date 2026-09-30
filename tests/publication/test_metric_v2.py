@@ -83,3 +83,34 @@ def test_component_exposure_prefers_finding_id_over_title() -> None:
     )
     assert comparison["numeric_changed"] is True
     assert comparison["frozen_outputs_modified"] is False
+
+
+def test_component_exposure_separates_missing_and_weak_guards_without_summary_rows() -> None:
+    findings = [
+        {"finding_id": "ipc_service_open_com.example.Open", "title": "service"},
+        {"finding_id": "ipc_service_weak_permission_com.example.Weak", "title": "service"},
+        {"finding_id": "ipc_provider_permission_weak_com.example.Provider", "title": "provider"},
+        {"finding_id": "ipc_activity_unknown_permission_com.example.Unknown", "title": "activity"},
+        {"finding_id": "manifest_exported_components", "title": "Exported activity without permission"},
+    ]
+    result = component_exposure_from_findings_v2(findings)
+    assert result["exported_services"] == 2
+    assert result["exported_activities"] == 1
+    assert result["exported_providers"] == 1
+    assert result["ipc_components_without_permission_guard"] == 1
+    assert result["ipc_components_with_weak_permission_guard"] == 2
+    assert result["unguarded_ipc_components"] == 3
+
+
+def test_component_identity_deduplicates_ipc_and_provider_acl_rows() -> None:
+    findings = [
+        {"finding_id": "ipc_provider_world_com.example.Shared"},
+        {"finding_id": "provider_world_com.example.Shared"},
+        {"finding_id": "provider_path_acl_com.example.Shared"},
+        {"finding_id": "ipc_activity_unknown_permission_com.example.Unknown"},
+        {"finding_id": "provider_acl_summary", "title": "Exported provider"},
+    ]
+    result = component_exposure_from_findings_v2(findings)
+    assert result["exported_providers"] == 1
+    assert result["exported_activities"] == 1
+    assert result["ipc_components_without_permission_guard"] == 1

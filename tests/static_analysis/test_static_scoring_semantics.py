@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.cli.execution import analytics
 from scytaledroid.StaticAnalysis.cli.execution.analytics import static_exposure_grade
-from scytaledroid.StaticAnalysis.detectors.correlation.scoring import risk_finding
+from scytaledroid.StaticAnalysis.core.findings import Badge, Finding, MasvsCategory, SeverityLevel
+from scytaledroid.StaticAnalysis.detectors.correlation.models import NetworkDiff, NetworkSnapshot
+from scytaledroid.StaticAnalysis.detectors.correlation.scoring import risk_finding, risk_score
 from scytaledroid.StaticAnalysis.reporting.html import render_html_report
 from scytaledroid.StaticAnalysis.risk import compute_risk_assessment
 
@@ -84,6 +86,44 @@ def test_correlation_priority_finding_is_marked_synthetic_not_canonical() -> Non
     assert finding.metrics["surface_kind"] == "correlation_priority"
     assert finding.metrics["finding_kind"] == "synthetic_prioritization"
     assert finding.metrics["is_canonical_app_risk"] is False
+
+
+def test_correlation_priority_excludes_config_observations_from_risk_weight() -> None:
+    observation = Finding(
+        finding_id="storage_allow_backup",
+        title="Android backup permitted",
+        severity_gate=SeverityLevel.P2,
+        category_masvs=MasvsCategory.STORAGE,
+        status=Badge.INFO,
+        because="Configuration observation only.",
+    )
+    context = SimpleNamespace(
+        intermediate_results=(
+            SimpleNamespace(
+                detector_id="storage_backup",
+                metrics={"allow_backup": True, "legacy_external_storage": True, "sensitive_keys": 0},
+                findings=(observation,),
+            ),
+        ),
+        permissions=SimpleNamespace(dangerous=()),
+        manifest_flags=SimpleNamespace(uses_cleartext_traffic=False),
+        manifest_summary=SimpleNamespace(target_sdk="35"),
+        exported_components=SimpleNamespace(total=lambda: 0),
+        metadata={},
+    )
+    network = NetworkSnapshot(
+        base_cleartext=None,
+        debug_cleartext=None,
+        trust_user_certs=False,
+        cleartext_domains=(),
+        pinned_domains=(),
+        http_hosts=(),
+        https_hosts=(),
+    )
+    profile = risk_score(context, (), NetworkDiff(), network, {})
+    assert profile["method_version"] == "correlation_priority_v2"
+    assert profile["factors"]["storage"] == 0
+    assert profile["factors"]["findings"] == 0
 
 
 def test_composite_risk_scoring_prefers_permission_band_field() -> None:

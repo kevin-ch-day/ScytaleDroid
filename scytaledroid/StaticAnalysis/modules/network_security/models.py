@@ -45,6 +45,7 @@ class NetworkSecurityPolicy:
     base_trust_anchors: tuple[str, ...] = ()
     domain_policies: tuple[DomainPolicy, ...] = ()
     raw_xml_hash: str | None = None
+    parse_valid: bool | None = None
 
     def to_dict(self) -> MutableMapping[str, object]:
         payload: MutableMapping[str, object] = {
@@ -58,6 +59,8 @@ class NetworkSecurityPolicy:
             payload["base_trust_anchors"] = list(self.base_trust_anchors)
         if self.raw_xml_hash:
             payload["raw_xml_hash"] = self.raw_xml_hash
+        if self.parse_valid is not None:
+            payload["parse_valid"] = self.parse_valid
         return payload
 
     @classmethod

@@ -49,7 +49,7 @@ class ProviderRecord:
 
 _GUARD_PRIORITY = {
     "none": 0,
-    "unknown": 1,
+    "unknown": 2,
     "weak": 1,
     "dangerous": 2,
     "custom": 2,
@@ -74,7 +74,7 @@ def _resolve_strength(
         return "none", tuple(levels)
     if strength == "signature":
         return "signature", tuple(levels)
-    if strength in {"dangerous", "weak", "unknown", "custom"}:
+    if strength in {"dangerous", "weak"}:
         return "weak", tuple(levels)
     return strength, tuple(levels)
 
@@ -219,69 +219,52 @@ def _classify_provider(
         return None
 
     if not provider.read_permission and not provider.write_permission:
-        risk = "No read/write permissions"
         because = (
-            "Exported provider lacks read/write permissions; content is globally"
-            " accessible to other apps."
+            "Exported provider declares no read/write permissions. Whether"
+            " sensitive content or operations are reachable requires code and"
+            " runtime caller-control review."
         )
         return Finding(
             finding_id=f"provider_world_{provider.name}",
             title=f"Exported provider without ACL — {provider.name}",
-            severity_gate=SeverityLevel.P0,
+            severity_gate=SeverityLevel.P2,
             category_masvs=MasvsCategory.PLATFORM,
-            status=Badge.FAIL,
+            status=Badge.INFO,
             because=because,
             remediate=(
                 "Set readPermission/writePermission or mark the provider private."
             ),
-            metrics={"risk": risk},
+            metrics={"manifest_guard": "none", "assessment_state": "REVIEW_REQUIRED"},
         )
 
     if not provider.read_permission:
         return Finding(
             finding_id=f"provider_unprotected_read_{provider.name}",
             title=f"Exported provider with unprotected read — {provider.name}",
-            severity_gate=SeverityLevel.P0,
+            severity_gate=SeverityLevel.P2,
             category_masvs=MasvsCategory.PLATFORM,
-            status=Badge.FAIL,
+            status=Badge.INFO,
             because=(
-                "Provider write ACL is present but the read direction is unprotected;"
-                " other apps can query content."
+                "Provider declares a write guard but no read guard. Query behavior"
+                " and runtime caller checks require review."
             ),
             remediate="Set android:readPermission or a general android:permission.",
-            metrics={"risk": "Unprotected read"},
+            metrics={"manifest_guard": "read_missing", "assessment_state": "REVIEW_REQUIRED"},
         )
 
     if not provider.write_permission:
         return Finding(
             finding_id=f"provider_unprotected_write_{provider.name}",
             title=f"Exported provider with unprotected write — {provider.name}",
-            severity_gate=SeverityLevel.P0,
+            severity_gate=SeverityLevel.P2,
             category_masvs=MasvsCategory.PLATFORM,
-            status=Badge.FAIL,
+            status=Badge.INFO,
             because=(
-                "Provider read ACL is present but the write direction is unprotected;"
-                " other apps can modify content."
+                "Provider declares a read guard but no write guard. Mutation behavior"
+                " and runtime caller checks require review."
             ),
             remediate="Set android:writePermission or a general android:permission.",
-            metrics={"risk": "Unprotected write"},
-        )
-
-    if provider.grant_uri_permissions and not provider.general_permission:
-        return Finding(
-            finding_id=f"provider_uri_perms_{provider.name}",
-            title=f"grantUriPermissions without base permission — {provider.name}",
-            severity_gate=SeverityLevel.P1,
-            category_masvs=MasvsCategory.PLATFORM,
-            status=Badge.WARN,
-            because=(
-                "Provider grants URI permissions dynamically without a base"
-                " permission; malicious apps can retain handles beyond intent scope."
-            ),
-            remediate=(
-                "Define signature-level base permissions before enabling grantUriPermissions"
-                " or disable URI grants."
-            ),
+            metrics={"manifest_guard": "write_missing", "assessment_state": "REVIEW_REQUIRED"},
         )
 
     if provider.path_permissions:
@@ -331,7 +314,9 @@ def _build_provider_snapshot(
         protection_levels=protection_levels,
         catalog=catalog,
     )
-    effective = _select_worst_guard(base_guard, read_guard, write_guard)
+    # The general permission is a fallback already applied to read/write by
+    # effective_provider_permissions(). Its absence is not an open direction.
+    effective = _select_worst_guard(read_guard, write_guard)
 
     path_details: list[Mapping[str, object]] = []
     for entry in provider.path_permissions:
@@ -460,6 +445,8 @@ class ProviderAclDetector(BaseDetector):
             badge = Badge.FAIL
         elif any(f.status is Badge.WARN for f in findings):
             badge = Badge.WARN
+        elif findings:
+            badge = Badge.INFO
 
         return make_detector_result(
             detector_id=self.detector_id,

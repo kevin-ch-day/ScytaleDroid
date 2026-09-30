@@ -98,7 +98,18 @@ def risk_score(
             + saturating_response(https_count, 3, 24)
         )
     )
-    if context.manifest_flags.uses_cleartext_traffic:
+    target_sdk_raw = getattr(getattr(context, "manifest_summary", None), "target_sdk", None)
+    try:
+        target_sdk = int(target_sdk_raw) if target_sdk_raw is not None else None
+    except (TypeError, ValueError):
+        target_sdk = None
+    nsc_metrics = network_metrics.get("NSC")
+    nsc_source = nsc_metrics.get("source") if isinstance(nsc_metrics, Mapping) else None
+    if (
+        context.manifest_flags.uses_cleartext_traffic
+        and (target_sdk is None or target_sdk < 38)
+        and not nsc_source
+    ):
         network_score += 20
     network_score += int(round(saturating_response(len(current_snapshot.cleartext_domains), 10, 40)))
     if network_diff.cleartext_flip and network_diff.cleartext_flip[1] is True:
@@ -126,12 +137,7 @@ def risk_score(
     secret_score = int(round(saturating_response(secret_count, 18, 72)))
 
     storage_metrics = metrics_map.get("storage_backup", {})
-    storage_score = 0
-    if storage_metrics.get("allow_backup"):
-        storage_score += 15
-    if storage_metrics.get("legacy_external_storage"):
-        storage_score += 12
-    storage_score += int(round(saturating_response(int(storage_metrics.get("sensitive_keys", 0)), 4, 24)))
+    storage_score = int(round(saturating_response(int(storage_metrics.get("sensitive_keys", 0)), 4, 24)))
 
     crypto_metrics = metrics_map.get("crypto_hygiene", {})
     crypto_score = (
@@ -158,9 +164,14 @@ def risk_score(
         for result in context.intermediate_results
         if result.detector_id != "correlation_engine"
         for finding in result.findings
+        if finding.status in {Badge.FAIL, Badge.WARN}
     )
 
-    diff_score = sum(finding_weight(finding) for finding in aggregate_findings)
+    diff_score = sum(
+        finding_weight(finding)
+        for finding in aggregate_findings
+        if finding.status in {Badge.FAIL, Badge.WARN}
+    )
 
     scores = {
         "components": component_score,
@@ -192,6 +203,7 @@ def risk_score(
         "score": total_score,
         "grade": grade,
         "surface_kind": "correlation_priority",
+        "method_version": "correlation_priority_v2",
         "finding_kind": "synthetic_prioritization",
         "is_canonical_app_risk": False,
         "factors": scores,

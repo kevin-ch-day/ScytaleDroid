@@ -18,10 +18,15 @@ from ..core.findings import (
     SeverityLevel,
 )
 from ..core.results_builder import make_detector_result
-from ..modules.network_security.models import NetworkSecurityPolicy
 from ..modules.permissions import classify_permission, load_permission_catalog
+from ..modules.permissions.catalog import PermissionDescriptor
 from .base import BaseDetector, register_detector
-from .components import ComponentRecord, iter_manifest_components
+from .components import (
+    ComponentRecord,
+    _component_permissions,
+    _provider_permission_guard,
+    iter_manifest_components,
+)
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 _COMPONENT_TAGS = {"activity", "activity-alias", "service", "receiver", "provider"}
@@ -79,9 +84,10 @@ def _classify_custom_permissions(
             for value in definition.get("protection_levels", ())
             if value
         )
-        if any(level in _STRONG_PERMISSION_LEVELS for level in levels):
+        base = PermissionDescriptor(name=name, protection=levels).base_level()
+        if base in _STRONG_PERMISSION_LEVELS or base == "internal":
             buckets["strong"].append(name)
-        elif any(level in _WEAK_PERMISSION_LEVELS for level in levels) or not levels:
+        elif base in _WEAK_PERMISSION_LEVELS or not levels:
             buckets["weak"].append(name)
         else:
             buckets["unknown"].append(name)
@@ -132,15 +138,27 @@ def _summarise_component_guards(
     for component in components:
         if not component.exported:
             continue
-        strength, _ = classify_permission(
-            component.permission or None,
-            manifest_levels=protection_levels,
-            catalog=catalog,
-        )
+        if component.component_type == "provider":
+            provider_permissions = _component_permissions(component)
+            if provider_permissions:
+                provider_guard, _ = _provider_permission_guard(
+                    provider_permissions,
+                    protection_levels=protection_levels,
+                    catalog=catalog,
+                )
+                strength = "signature" if provider_guard == "strong" else provider_guard
+            else:
+                strength = "none"
+        else:
+            strength, _ = classify_permission(
+                component.permission or None,
+                manifest_levels=protection_levels,
+                catalog=catalog,
+            )
         guard_histogram[strength] += 1
         type_counter = by_type.setdefault(component.component_type, Counter())
         type_counter[strength] += 1
-        if strength in {"none", "weak", "unknown", "dangerous"}:
+        if strength in {"none", "weak", "dangerous"}:
             weak_exports.append(component.name)
         if strength == "dangerous":
             dangerous_exports.append(component.name)
@@ -157,19 +175,6 @@ def _summarise_component_guards(
         "signature_exports": tuple(sorted(signature_exports)),
         "unknown_exports": tuple(sorted(unknown_exports)),
     }
-
-
-def _network_policy_allows_cleartext(policy: NetworkSecurityPolicy | None) -> bool:
-    if policy is None:
-        return True
-    if policy.base_cleartext is False:
-        for domain in policy.domain_policies:
-            if domain.cleartext_permitted is True:
-                return True
-        return False
-    if policy.base_cleartext is True:
-        return True
-    return True
 
 
 @register_detector
@@ -211,6 +216,10 @@ class ManifestBaselineDetector(BaseDetector):
         component_affinities = _collect_component_affinities(context.manifest_root)
         custom_permissions = dict(context.permissions.custom_definitions)
         custom_permission_buckets = _classify_custom_permissions(custom_permissions)
+        try:
+            target_sdk_value = int(manifest_summary.target_sdk)
+        except (TypeError, ValueError):
+            target_sdk_value = None
 
         if manifest_flags.debuggable:
             findings.append(
@@ -236,7 +245,14 @@ class ManifestBaselineDetector(BaseDetector):
             )
 
         cleartext_risk = bool(manifest_flags.uses_cleartext_traffic)
-        if cleartext_risk and not _network_policy_allows_cleartext(network_policy):
+        if target_sdk_value is not None and target_sdk_value >= 38:
+            cleartext_risk = False
+        if (
+            cleartext_risk
+            and network_policy is not None
+            and network_policy.source_path
+            and (target_sdk_value is None or target_sdk_value >= 24)
+        ):
             cleartext_risk = False
 
         if cleartext_risk:
@@ -267,15 +283,16 @@ class ManifestBaselineDetector(BaseDetector):
             findings.append(
                 Finding(
                     finding_id="manifest_exported_weak_guards",
-                    title="Exported components use weak guards",
-                    severity_gate=SeverityLevel.P1,
+                    title="Exported components with absent or broad manifest guards",
+                    severity_gate=SeverityLevel.P2,
                     category_masvs=MasvsCategory.PLATFORM,
-                    status=Badge.WARN,
+                    status=Badge.INFO,
                     because=(
-                        "Exported components rely on normal/dangerous permissions or"
-                        " no guard at all: "
+                        "Exported components have no manifest guard or rely on"
+                        " normal/dangerous permissions: "
                         + ", ".join(weak_exports[:6])
                         + (" …" if len(weak_exports) > 6 else "")
+                        + ". Sensitive behavior and runtime caller checks require review."
                     ),
                     evidence=(
                         _manifest_pointer(
@@ -285,8 +302,8 @@ class ManifestBaselineDetector(BaseDetector):
                         ),
                     ),
                     remediate=(
-                        "Protect exported components with signature-level permissions"
-                        " or mark them non-exported."
+                        "Review sensitive behavior and runtime caller checks; restrict"
+                        " components that cross a protected trust boundary."
                     ),
                 )
             )
@@ -295,16 +312,17 @@ class ManifestBaselineDetector(BaseDetector):
             findings.append(
                 Finding(
                     finding_id="manifest_backup_and_exports",
-                    title="Backup plus exported weak components",
-                    severity_gate=SeverityLevel.P1,
+                    title="Backup capability and exported components to review",
+                    severity_gate=SeverityLevel.P2,
                     category_masvs=MasvsCategory.STORAGE,
-                    status=Badge.WARN,
+                    status=Badge.INFO,
                     because=(
-                        "android:allowBackup is enabled while exported components"
-                        " lack strong permission guards ("
+                        "Backup is permitted and exported components have broad or"
+                        " absent manifest guards ("
                         + ", ".join(weak_exports[:4])
                         + (" …" if len(weak_exports) > 4 else "")
-                        + "). Backup data may contain IPC-accessible secrets."
+                        + "). This combination does not establish that backup data"
+                        " contains sensitive material or is accessible through IPC."
                     ),
                     evidence=(
                         _manifest_pointer(
@@ -315,8 +333,8 @@ class ManifestBaselineDetector(BaseDetector):
                         ),
                     ),
                     remediate=(
-                        "Disable auto-backup or harden exported components with"
-                        " signature-level permissions."
+                        "Review backup inclusion rules and exported component behavior"
+                        " before assessing data exposure."
                     ),
                 )
             )
@@ -327,13 +345,13 @@ class ManifestBaselineDetector(BaseDetector):
             findings.append(
                 Finding(
                     finding_id="manifest_backup_enabled",
-                    title="Auto-backup enabled",
-                    severity_gate=SeverityLevel.P1,
+                    title="Android backup permitted",
+                    severity_gate=SeverityLevel.P2,
                     category_masvs=MasvsCategory.STORAGE,
-                    status=Badge.WARN,
+                    status=Badge.INFO,
                     because=(
-                        "Application data can be exported via Android's backup channel"
-                        " (android:allowBackup not set to false)."
+                        "android:allowBackup is not false. Actual data inclusion depends"
+                        " on backup rules, platform behavior, and the data stored."
                     ),
                     evidence=(
                         _manifest_pointer(
@@ -343,28 +361,40 @@ class ManifestBaselineDetector(BaseDetector):
                             full_backup_content=full_backup or None,
                         ),
                     ),
-                    remediate="Set android:allowBackup="
-                    "false or provide an explicit backup configuration that excludes sensitive data.",
+                    remediate="Review dataExtractionRules and fullBackupContent for"
+                    " sensitive data; disable backup or exclude data where needed.",
                 )
             )
 
         if manifest_flags.request_legacy_external_storage:
+            legacy_inert = target_sdk_value is not None and target_sdk_value >= 30
             findings.append(
                 Finding(
                     finding_id="manifest_legacy_external_storage",
-                    title="Legacy external storage requested",
-                    severity_gate=SeverityLevel.P1,
+                    title=(
+                        "Legacy external storage attribute present (ignored on Android 11+)"
+                        if legacy_inert
+                        else "Legacy external storage requested"
+                    ),
+                    severity_gate=SeverityLevel.P2 if legacy_inert else SeverityLevel.P1,
                     category_masvs=MasvsCategory.STORAGE,
-                    status=Badge.WARN,
+                    status=Badge.INFO if legacy_inert else Badge.WARN,
                     because=(
-                        "android:requestLegacyExternalStorage is true. This bypasses"
-                        " scoped storage protections and should be phased out."
+                        "android:requestLegacyExternalStorage is true, but Android 11+"
+                        " ignores it for apps targeting API 30+. It does not show a"
+                        " scoped-storage bypass on those devices."
+                        if legacy_inert
+                        else (
+                            "android:requestLegacyExternalStorage is true; a legacy"
+                            " scoped-storage opt-out may apply on supported older devices."
+                        )
                     ),
                     evidence=(
                         _manifest_pointer(
                             apk_path,
                             "application@requestLegacyExternalStorage",
                             request_legacy_external_storage=True,
+                            target_sdk=target_sdk_value,
                         ),
                     ),
                     remediate="Adopt scoped storage APIs and drop requestLegacyExternalStorage for production builds.",
@@ -477,12 +507,6 @@ class ManifestBaselineDetector(BaseDetector):
                     remediate="Document why components require custom processes and ensure permissions isolate IPC boundaries.",
                 )
             )
-
-        target_sdk_value: int | None
-        try:
-            target_sdk_value = int(manifest_summary.target_sdk) if manifest_summary.target_sdk else None
-        except (TypeError, ValueError):
-            target_sdk_value = None
 
         if target_sdk_value and target_sdk_value < 31:
             findings.append(
