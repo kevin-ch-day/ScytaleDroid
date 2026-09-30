@@ -73,6 +73,13 @@ def classify_session_header_diagnostic(
         return "in_progress_partial_pending_links"
     if actual_run_rows != header_total_run_count:
         return "run_count_mismatch"
+    if (
+        actual_completed_rows > 0
+        and actual_completed_rows < actual_run_rows
+        and actual_started_rows == 0
+        and actual_link_rows == 0
+    ):
+        return "partial_session_pending_links"
     if actual_completed_rows > 0 and actual_link_rows == 0:
         return "missing_links"
     if actual_completed_rows == actual_run_rows and actual_run_rows > 0 and actual_rollup_rows == 0:

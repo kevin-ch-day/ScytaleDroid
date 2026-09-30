@@ -73,3 +73,31 @@ def test_classify_session_header_diagnostic_keeps_interrupted_failed_session_hea
         actual_rollup_rows=0,
     )
     assert status == "healthy"
+
+
+def test_classify_session_header_diagnostic_marks_partial_terminal_session_pending_links() -> None:
+    status = classify_session_header_diagnostic(
+        header_total_run_count=80,
+        header_session_link_rows=0,
+        header_rollup_rows=1,
+        actual_run_rows=80,
+        actual_completed_rows=79,
+        actual_started_rows=0,
+        actual_link_rows=0,
+        actual_rollup_rows=1,
+    )
+    assert status == "partial_session_pending_links"
+
+
+def test_classify_session_header_diagnostic_marks_completed_session_missing_links() -> None:
+    status = classify_session_header_diagnostic(
+        header_total_run_count=3,
+        header_session_link_rows=0,
+        header_rollup_rows=1,
+        actual_run_rows=3,
+        actual_completed_rows=3,
+        actual_started_rows=0,
+        actual_link_rows=0,
+        actual_rollup_rows=1,
+    )
+    assert status == "missing_links"

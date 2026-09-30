@@ -188,6 +188,33 @@ PYTHONPATH=. python scripts/db/refresh_static_analysis_sessions.py \
 Normal static runs also trigger a **best-effort** refresh at run finalization and after
 successful ``static_session_run_links`` writes (see ``static_session_summary.py``).
 
+### Abandoned static STARTED row after a host restart
+
+The persistent-scan interlock blocks a new scan while any run remains ``STARTED``.
+Inspect the exact row first:
+
+```bash
+PYTHONPATH=. python scripts/db/reconcile_stale_static_run.py --run-id 12345
+```
+
+For a verified abandoned row with no canonical child evidence and no static scan
+lock, use ``--apply`` with the exact ``database``, ``session_stamp``,
+``started_at_utc``, and ``row_sha256`` values shown by the dry run:
+
+```bash
+PYTHONPATH=. python scripts/db/reconcile_stale_static_run.py --run-id 12345 \
+  --expect-database '<catalog-from-dry-run>' \
+  --expect-session '<session-from-dry-run>' \
+  --expect-started-at '<timestamp-from-dry-run>' \
+  --expect-row-sha256 '<digest-from-dry-run>' --apply
+```
+
+The exact update marks only that run ``FAILED`` with ``stale_finalize``, refreshes
+its session header, and writes a before/after receipt under
+``output/audit/static_run_reconciliation/``. It does not rebuild a partial
+session's run map or links and does not start another scan. If the row has
+child evidence or a lock remains, investigate before any manual repair.
+
 Canonical writers only (empty historical legacy-table rows are **not** treated as failure):
 
 ```bash
@@ -271,6 +298,7 @@ Do not strip inline finding evidence until all of the following are true:
 | `audit_static_permission_observation_linkage.py` | Read-only core DB: matrix → run SHA-256 / versions / `apk_id`. |
 | `run_permission_intel_scytale_s2_readiness_audit.sh` | Bundles intel check + audits + targeted pytest (best-effort if DB unset). |
 | `audit_static_session.py` | Cohort audit: canonical tables + `v_web_*` + handoff + legacy-table counts (informational); prints copyable SQL. |
+| `reconcile_stale_static_run.py` | Dry-run-first, exact-row recovery for an abandoned empty `STARTED` static run; transactional apply with receipt. |
 | `report_static_session_grain_integrity.py` | Read-only grain map: SAR counts + optional archive JSON pipeline rollups vs DB findings (split-heavy triage). |
 | `report_apk_lineage_availability.py` | Read-only package/version/hash/install-set lineage, byte availability, static coverage, dynamic coverage, and design checks. |
 | `report_package_lineage_workbench.py` | Read-only package-first operator workbench for identity, bytes, static/dynamic coverage, gaps, and recommended actions. |
