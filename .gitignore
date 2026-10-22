@@ -66,6 +66,10 @@ id_rsa
 id_ed25519
 
 # --- Runtime / evidence trees ---
+# No files under these trees are tracked at this HEAD.
+# output/ excludes generated audit/, evidence/, publication/ and tables/ plus
+# locally retained paper/ freezes. They remain custody evidence outside Git;
+# ignoring them never permits deleting or regenerating a frozen bundle.
 logs/
 output/
 data/
@@ -107,3 +111,8 @@ scytaledroid/Utils/AndroidPermCatalog/cache/*.csv
 *.bak
 *.rpm
 teamviewer*.rpm
+
+# --- Claude local overrides (shared settings and commands stay tracked) ---
+.claude/settings.local.json
+.claude/*.local.*
+CLAUDE.local.md
