@@ -15,6 +15,7 @@ def test_load_dotenv_preserves_process_values_and_parses_quoted_values(monkeypat
         encoding="utf-8",
     )
     monkeypatch.delenv("SCYTALEDROID_NO_DOTENV", raising=False)
+    monkeypatch.delenv("SCYTALEDROID_DATA_DIR", raising=False)
     monkeypatch.setenv("EXISTING", "from-process")
 
     try:
@@ -64,6 +65,10 @@ def test_app_config_reads_workspace_paths_from_declared_env_file(tmp_path: Path)
     environment = os.environ.copy()
     environment.pop("PYTEST_CURRENT_TEST", None)
     environment.pop("SCYTALEDROID_NO_DOTENV", None)
+    # Process values win over the env file, so drop workspace roots an isolated
+    # test runner may have exported.
+    for key in ("SCYTALEDROID_DATA_DIR", "SCYTALEDROID_OUTPUT_DIR", "SCYTALEDROID_LOGS_DIR", "SCYTALEDROID_DYNAMIC_EVIDENCE_ROOT"):
+        environment.pop(key, None)
     environment["SCYTALEDROID_ENV_FILE"] = str(env_file)
     environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
 

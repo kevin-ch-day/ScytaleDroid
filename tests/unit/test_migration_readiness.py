@@ -4,11 +4,22 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
 from scytaledroid.Config import app_config
 from scytaledroid.Workspace.migration_readiness import (
     build_migration_readiness_report,
     render_migration_readiness_report,
 )
+
+
+@pytest.fixture(autouse=True)
+def _repo_relative_workspace_roots(monkeypatch) -> None:
+    """These checks assume default repo-relative roots, not runner-exported absolute ones."""
+
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
+    monkeypatch.setattr(app_config, "LOGS_DIR", "logs")
+    monkeypatch.setattr(app_config, "DYNAMIC_EVIDENCE_ROOT", "data/evidence/dynamic")
 
 
 @dataclass

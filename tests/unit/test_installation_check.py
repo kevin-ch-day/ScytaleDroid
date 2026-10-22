@@ -4,8 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from scytaledroid.Config import app_config
 from scytaledroid.Diagnostics import deployment_check
 from scytaledroid.Diagnostics import installation_check as check
+
+
+@pytest.fixture(autouse=True)
+def _repo_relative_workspace_roots(monkeypatch) -> None:
+    """These checks assume default repo-relative roots, not runner-exported absolute ones."""
+
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
+    monkeypatch.setattr(app_config, "LOGS_DIR", "logs")
+    monkeypatch.setattr(app_config, "DYNAMIC_EVIDENCE_ROOT", "data/evidence/dynamic")
 
 
 def _seed_source(root: Path) -> None:
