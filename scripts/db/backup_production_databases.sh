@@ -9,8 +9,34 @@ umask 077
 
 readonly REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly ENV_FILE="${REPO_ROOT}/.env"
-readonly MERCURY_MOUNT="/mnt/MERCURY_DATA_V2"
-readonly MERCURY_UUID="715f29a9-2671-477b-8c8d-515d190addb9"
+readonly DEFAULT_MERCURY_MOUNT="/mnt/MERCURY_DATA_V2"
+readonly DEFAULT_MERCURY_UUID="715f29a9-2671-477b-8c8d-515d190addb9"
+
+# Non-secret Mercury settings: process environment first, then a literal .env
+# line, then the built-in default.  Never sources .env.
+optional_setting() {
+    local key="$1" default="$2" value=""
+    value="${!key:-}"
+    if [[ -z "$value" && -f "$ENV_FILE" ]]; then
+        value="$(awk -v wanted="$key" '
+            index($0, wanted "=") == 1 {
+                value = substr($0, length(wanted) + 2)
+                sub(/\r$/, "", value)
+                if ((value ~ /^".*"$/) || (value ~ /^'\''.*'\''$/)) {
+                    value = substr(value, 2, length(value) - 2)
+                }
+                print value
+                exit
+            }
+        ' "$ENV_FILE")"
+    fi
+    printf '%s' "${value:-$default}"
+}
+
+MERCURY_MOUNT="$(optional_setting SCYTALEDROID_MERCURY_MOUNTPOINT "$DEFAULT_MERCURY_MOUNT")"
+MERCURY_MOUNT="${MERCURY_MOUNT%/}"
+MERCURY_UUID="$(optional_setting SCYTALEDROID_MERCURY_UUID "$DEFAULT_MERCURY_UUID")"
+readonly MERCURY_MOUNT MERCURY_UUID
 readonly APPROVED_ROOT="${MERCURY_MOUNT}/mercury_backups"
 readonly CORE_DB="scytaledroid_core_prod"
 readonly INTEL_DB="android_permission_intel"
@@ -61,7 +87,9 @@ env_value() {
 
 assert_mercury_mount() {
     local mounted_uuid
-    mounted_uuid="$(findmnt -no UUID --target "$MERCURY_MOUNT" 2>/dev/null || true)"
+    [[ "$MERCURY_MOUNT" == /?* ]] || die "SCYTALEDROID_MERCURY_MOUNTPOINT must be an absolute path"
+    mountpoint -q -- "$MERCURY_MOUNT" || die "Mercury mountpoint is not an active mount: ${MERCURY_MOUNT}"
+    mounted_uuid="$(findmnt -no UUID --mountpoint "$MERCURY_MOUNT" 2>/dev/null | tail -n 1 || true)"
     [[ "$mounted_uuid" == "$MERCURY_UUID" ]] || die "Mercury is not mounted at ${MERCURY_MOUNT} with expected UUID"
 }
 
@@ -91,17 +119,19 @@ make_option_file() {
     CREATED_OPTION_FILE="$option_file"
 }
 
+# Exclusive --defaults-file: ~/.my.cnf must not override the
+# dedicated backup account read from .env.
 db_scalar() {
     local option_file="$1" database="$2" sql="$3"
-    mariadb --defaults-extra-file="$option_file" --database="$database" --batch --skip-column-names --raw -e "$sql"
+    mariadb --defaults-file="$option_file" --database="$database" --batch --skip-column-names --raw -e "$sql"
 }
 
 dump_catalog() {
     local database="$1" option_file="$2" dump_file="$3" schema_file="$4"
-    mariadb-dump --defaults-extra-file="$option_file" \
+    mariadb-dump --defaults-file="$option_file" \
         --databases "$database" --single-transaction --quick --routines --triggers --events \
         --hex-blob --add-drop-database --skip-dump-date | gzip -9 >"$dump_file"
-    mariadb-dump --defaults-extra-file="$option_file" \
+    mariadb-dump --defaults-file="$option_file" \
         --databases "$database" --no-data --routines --triggers --events \
         --add-drop-database --skip-dump-date | gzip -9 >"$schema_file"
 }
@@ -121,7 +151,7 @@ main() {
     local core_tables intel_tables core_version intel_governance server_version client_version start finish
     local engine_rows fedora_version git_branch git_commit git_dirty
 
-    for command_name in awk date df findmnt git gzip mariadb mariadb-dump realpath sha256sum stat zgrep; do
+    for command_name in awk date df findmnt git gzip mariadb mariadb-dump mountpoint realpath sha256sum stat zgrep; do
         require_command "$command_name"
     done
     [[ -f "$ENV_FILE" ]] || die "missing .env at ${ENV_FILE}"
@@ -177,8 +207,8 @@ main() {
     cat >"${DESTINATION}/restore_commands.txt" <<RESTORE
 # Restore only into deliberately chosen, non-production targets.
 # Create a new owner-only option file containing [client] host/port/user/password.
-gzip -cd ${CORE_DB}.sql.gz | mariadb --defaults-extra-file=/path/to/owner-only-client.cnf
-gzip -cd ${INTEL_DB}.sql.gz | mariadb --defaults-extra-file=/path/to/owner-only-client.cnf
+gzip -cd ${CORE_DB}.sql.gz | mariadb --defaults-file=/path/to/owner-only-client.cnf
+gzip -cd ${INTEL_DB}.sql.gz | mariadb --defaults-file=/path/to/owner-only-client.cnf
 RESTORE
     cat >"${DESTINATION}/verification.txt" <<VERIFY
 sha256sum --check SHA256SUMS: PASS

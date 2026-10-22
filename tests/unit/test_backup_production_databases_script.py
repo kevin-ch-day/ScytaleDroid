@@ -16,7 +16,8 @@ def test_backup_helper_is_credential_safe_and_read_only() -> None:
     assert 'rm -f -- "$option_file"' in source
     assert "OPTION_FILES+=(\"$option_file\")" in source
     assert 'core_option="$(make_option_file' not in source
-    assert "--defaults-extra-file=\"$option_file\"" in source
+    assert "--defaults-file=\"$option_file\"" in source
+    assert "--defaults-extra-file" not in source  # ~/.my.cnf must not override .env credentials
     assert "password=" in source
     assert "export " not in source
     assert "-pPASSWORD" not in source
@@ -39,3 +40,59 @@ def test_backup_helper_enforces_governed_destination_and_verification() -> None:
     assert "manifest.txt" in source
     assert "restore_commands.txt" in source
     assert "verification.txt" in source
+
+
+def _resolved_mercury_settings(tmp_path: Path, *, env_lines: str, environ: dict[str, str]) -> list[str]:
+    import os
+    import subprocess
+
+    script_copy = tmp_path / "scripts" / "db" / SCRIPT.name
+    script_copy.parent.mkdir(parents=True)
+    # Drop the final `main "$@"` call so only the setting resolution runs.
+    body = SCRIPT.read_text(encoding="utf-8").replace('\nmain "$@"\n', "\n")
+    script_copy.write_text(body + '\nprintf "%s\\n%s\\n%s\\n" "$MERCURY_MOUNT" "$MERCURY_UUID" "$APPROVED_ROOT"\n')
+    (tmp_path / ".env").write_text(env_lines, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SCYTALEDROID_MERCURY_")}
+    env.update(environ)
+    # The EXIT trap's cleanup returns non-zero when no option files were created,
+    # so judge the run by its printed settings rather than the exit status.
+    out = subprocess.run(["bash", str(script_copy)], env=env, capture_output=True, text=True, check=False)
+    assert "ERROR" not in out.stderr
+    return out.stdout.splitlines()
+
+
+def test_backup_helper_mount_defaults_to_v2(tmp_path: Path) -> None:
+    mount, uuid, root = _resolved_mercury_settings(tmp_path, env_lines="# SCYTALEDROID_MERCURY_MOUNTPOINT=/x\n", environ={})
+
+    assert mount == "/mnt/MERCURY_DATA_V2"
+    assert uuid == "715f29a9-2671-477b-8c8d-515d190addb9"
+    assert root == "/mnt/MERCURY_DATA_V2/mercury_backups"
+
+
+def test_backup_helper_mount_reads_dotenv_setting(tmp_path: Path) -> None:
+    mount, uuid, root = _resolved_mercury_settings(
+        tmp_path,
+        env_lines='SCYTALEDROID_MERCURY_MOUNTPOINT="/mnt/MERCURY_DATA/"\nSCYTALEDROID_MERCURY_UUID=abc\n',
+        environ={},
+    )
+
+    assert mount == "/mnt/MERCURY_DATA"
+    assert uuid == "abc"
+    assert root == "/mnt/MERCURY_DATA/mercury_backups"
+
+
+def test_backup_helper_mount_environment_overrides_dotenv(tmp_path: Path) -> None:
+    mount, _uuid, _root = _resolved_mercury_settings(
+        tmp_path,
+        env_lines="SCYTALEDROID_MERCURY_MOUNTPOINT=/mnt/MERCURY_DATA\n",
+        environ={"SCYTALEDROID_MERCURY_MOUNTPOINT": "/srv/mercury"},
+    )
+
+    assert mount == "/srv/mercury"
+
+
+def test_backup_helper_checks_active_mount_before_uuid() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert 'mountpoint -q -- "$MERCURY_MOUNT"' in source
+    assert "source \"$ENV_FILE\"" not in source and ". \"$ENV_FILE\"" not in source

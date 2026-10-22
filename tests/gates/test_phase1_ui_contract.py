@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -164,6 +165,13 @@ def test_main_menu_mercury_status_variants(monkeypatch) -> None:
 
     monkeypatch.setattr(mercury_storage, "mercury_storage_status", lambda: _status())
     assert app_main._describe_main_menu_mercury() == "not mounted (use menu 11)"
+
+    elsewhere = replace(_status(), device_mount_targets=(Path("/mnt/MERCURY_DATA"),))
+    monkeypatch.setattr(mercury_storage, "mercury_storage_status", lambda: elsewhere)
+    assert (
+        app_main._describe_main_menu_mercury()
+        == "mounted at /mnt/MERCURY_DATA, not /mnt/MERCURY_DATA_V2 (use menu 11)"
+    )
 
     monkeypatch.setattr(
         mercury_storage,

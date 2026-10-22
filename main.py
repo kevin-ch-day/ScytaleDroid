@@ -165,8 +165,12 @@ def _describe_main_menu_mercury() -> str:
         log.warning(f"Failed to read Mercury mount status: {exc}", category="application")
         return "unknown"
 
+    if status.uuid_mismatch:
+        return f"UUID mismatch on {status.device_path} (use menu 11)"
     if status.mountpoint_mounted:
         return f"mounted at {status.mountpoint}"
+    if status.mounted_elsewhere:
+        return f"mounted at {status.mounted_elsewhere[0]}, not {status.mountpoint} (use menu 11)"
     if status.user_media_mounted:
         return f"user-session only at {status.user_media_mount} (use menu 11)"
     if status.device_exists:

@@ -643,8 +643,28 @@ def _print_mercury_status() -> None:
         ["User-session mounted", "yes" if status.user_media_mounted else "no"],
         ["Compatibility alias", "yes" if status.compatibility_alias_exists else "no"],
         ["Alias target", status.compatibility_alias_target or "—"],
+        ["Device mounted at", ", ".join(str(t) for t in status.device_mount_targets) or "—"],
     ]
+    if status.expected_uuid:
+        uuid_state = "mismatch" if status.uuid_mismatch else "ok"
+        rows.append(["UUID check", f"{uuid_state} (expected {status.expected_uuid}, found {status.device_uuid or '—'})"])
     table_utils.render_table(["Item", "Value"], rows, compact=True, accent_first_column=True)
+    if status.mounted_elsewhere:
+        print(
+            status_messages.status(
+                f"{status.label} is already mounted at {', '.join(str(t) for t in status.mounted_elsewhere)}, "
+                f"not at {status.mountpoint}. Set SCYTALEDROID_MERCURY_MOUNTPOINT to that path "
+                "instead of mounting it a second time.",
+                level="warn",
+            )
+        )
+    if status.uuid_mismatch:
+        print(
+            status_messages.status(
+                f"{status.device_path} does not carry SCYTALEDROID_MERCURY_UUID; refusing to treat it as Mercury.",
+                level="error",
+            )
+        )
 
 
 def _print_mercury_command_result(result: mercury_storage.CommandResult) -> None:
@@ -718,14 +738,34 @@ def _run_full_external_apk_store_checker() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def _mercury_mount_refusal(status: mercury_storage.MercuryStorageStatus) -> str | None:
+    """Return why a preferred-path mount must not be attempted, or None when it may proceed."""
+
+    if not status.device_exists:
+        return f"Device label not found: {status.device_path}"
+    if status.uuid_mismatch:
+        return (
+            f"{status.device_path} has UUID {status.device_uuid or 'unknown'}, "
+            f"expected {status.expected_uuid}. Not mounting."
+        )
+    if status.mounted_elsewhere:
+        where = ", ".join(str(t) for t in status.mounted_elsewhere)
+        return (
+            f"{status.label} is already mounted at {where}. Not mounting it a second time at "
+            f"{status.mountpoint}; set SCYTALEDROID_MERCURY_MOUNTPOINT={status.mounted_elsewhere[0]} instead."
+        )
+    return None
+
+
 def _mount_mercury_preferred() -> None:
     status = mercury_storage.mercury_storage_status()
     if status.mountpoint_mounted:
         print(status_messages.status(f"Already mounted at {status.mountpoint}.", level="success"))
         prompt_utils.press_enter_to_continue()
         return
-    if not status.device_exists:
-        print(status_messages.status(f"Device label not found: {status.device_path}", level="error"))
+    refusal = _mercury_mount_refusal(status)
+    if refusal:
+        print(status_messages.status(refusal, level="error"))
         prompt_utils.press_enter_to_continue()
         return
     if status.user_media_mounted:
@@ -769,7 +809,7 @@ def _mount_mercury_user_session() -> None:
     print(
         status_messages.status(
             "Mounting with udisksctl does not require sudo, but ScytaleDroid's preferred "
-            f"cold-store root remains {mercury_storage.MERCURY_V2_MOUNTPOINT}.",
+            f"cold-store root remains {mercury_storage.configured_mercury_mountpoint()}.",
             level="info",
         )
     )
@@ -784,25 +824,45 @@ def _unmount_mercury_user_session() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def mercury_apk_storage_menu() -> None:
-    while True:
-        print()
-        menu_utils.print_header("Mercury APK Storage")
-        _print_mercury_status()
-        print()
-        menu_utils.print_hint(
-            f"Preferred state: MERCURY_DATA_V2 mounted at {mercury_storage.MERCURY_V2_MOUNTPOINT} "
-            "before harvest/static/APK cold-store work."
-        )
-        items = [
-            menu_utils.MenuOption("1", "Refresh status"),
-            menu_utils.MenuOption("2", f"Mount Mercury V2 at {mercury_storage.MERCURY_V2_MOUNTPOINT} (sudo)"),
-            menu_utils.MenuOption("3", f"Unmount {mercury_storage.MERCURY_V2_MOUNTPOINT} (sudo)"),
+def _mercury_menu_items(status: mercury_storage.MercuryStorageStatus) -> list[menu_utils.MenuOption]:
+    items = [menu_utils.MenuOption("1", "Refresh status")]
+    # Do not offer a second mount of a device that is already mounted elsewhere.
+    if not status.mounted_elsewhere:
+        items.append(menu_utils.MenuOption("2", f"Mount Mercury V2 at {status.mountpoint} (sudo)"))
+    items.extend(
+        [
+            menu_utils.MenuOption("3", f"Unmount {status.mountpoint} (sudo)"),
             menu_utils.MenuOption("4", "Mount Mercury V2 in user session (udisksctl fallback)"),
             menu_utils.MenuOption("5", "Unmount user-session Mercury mount"),
             menu_utils.MenuOption("6", "Run quick APK store mount check"),
             menu_utils.MenuOption("7", "Run full APK store SHA-256 check"),
         ]
+    )
+    return items
+
+
+def _run_mercury_action(action) -> None:
+    """Run a menu action, reporting failures instead of leaving the menu."""
+
+    try:
+        action()
+    except Exception as exc:  # operator menu guard: report, never exit the TUI
+        print(status_messages.status(f"Mercury storage action failed: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+
+
+def mercury_apk_storage_menu() -> None:
+    while True:
+        print()
+        menu_utils.print_header("Mercury APK Storage")
+        _print_mercury_status()
+        status = mercury_storage.mercury_storage_status()
+        print()
+        menu_utils.print_hint(
+            f"Preferred state: {status.label} mounted at {status.mountpoint} "
+            "before harvest/static/APK cold-store work."
+        )
+        items = _mercury_menu_items(status)
         spec_kwargs = display_settings.apply_menu_defaults(
             {"items": items, "exit_label": "Back", "show_exit": True}
         )
@@ -813,18 +873,18 @@ def mercury_apk_storage_menu() -> None:
         if choice == "1":
             continue
         if choice == "2":
-            _mount_mercury_preferred()
+            _run_mercury_action(_mount_mercury_preferred)
         elif choice == "3":
-            _unmount_mercury_preferred()
+            _run_mercury_action(_unmount_mercury_preferred)
         elif choice == "4":
-            _mount_mercury_user_session()
+            _run_mercury_action(_mount_mercury_user_session)
         elif choice == "5":
-            _unmount_mercury_user_session()
+            _run_mercury_action(_unmount_mercury_user_session)
         elif choice == "6":
-            _run_external_apk_store_checker(verify_sha256=False)
+            _run_mercury_action(_run_external_apk_store_checker)
             prompt_utils.press_enter_to_continue()
         elif choice == "7":
-            _run_full_external_apk_store_checker()
+            _run_mercury_action(_run_full_external_apk_store_checker)
 
 
 __all__ = ["mercury_apk_storage_menu", "workspace_menu"]
