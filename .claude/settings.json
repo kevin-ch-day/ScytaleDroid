@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(git push *--force*)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(*mysql *-u systemadmin*)",
+      "Bash(*mysql *-usystemadmin*)",
+      "Bash(*mysql *--user=systemadmin*)",
+      "Bash(*mysql *--user systemadmin*)",
+      "Bash(*mariadb *-u systemadmin*)",
+      "Bash(*mariadb *-usystemadmin*)",
+      "Bash(*mariadb *--user=systemadmin*)",
+      "Bash(*mariadb *--user systemadmin*)",
+      "Bash(git push * -f*)",
+      "Bash(git *reset *--hard*)",
+      "Bash(rm -r -f *)",
+      "Bash(rm -f -r *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git commit *)",
+      "Bash(adb *)",
+      "Bash(*permission_intel_phase1_copy*)",
+      "Bash(*permission_governance_import*)",
+      "Bash(*migration*)",
+      "Bash(*bootstrap*)",
+      "Bash(./run.sh *)"
+    ],
+    "allow": [
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(git branch --show-current)",
+      "Bash(git branch -vv)",
+      "Bash(git branch --list *)",
+      "Bash(git worktree list *)",
+      "Bash(rg *)",
+      "Bash(grep *)",
+      "Bash(scripts/dev/test_fast_isolated.sh *)",
+      "Bash(git branch)",
+      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT CURRENT_USER\")",
+      "Bash(mariadb --user=claude_ro --batch --execute=\"SHOW GRANTS\")",
+      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT * FROM scytaledroid_core_prod.apps LIMIT 1\")",
+      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT * FROM scytaledroid_core_prod.app_versions LIMIT 1\")",
+      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT * FROM scytaledroid_core_prod.static_analysis_runs LIMIT 1\")",
+      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT * FROM scytaledroid_core_prod.static_analysis_findings LIMIT 1\")",
+      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT * FROM scytaledroid_core_prod.dynamic_sessions LIMIT 1\")"
+    ]
+  }
+}
