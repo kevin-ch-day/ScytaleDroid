@@ -8,14 +8,6 @@
       "Bash(git reset --hard *)",
       "Bash(rm -rf *)",
       "Bash(rm -fr *)",
-      "Bash(*mysql *-u systemadmin*)",
-      "Bash(*mysql *-usystemadmin*)",
-      "Bash(*mysql *--user=systemadmin*)",
-      "Bash(*mysql *--user systemadmin*)",
-      "Bash(*mariadb *-u systemadmin*)",
-      "Bash(*mariadb *-usystemadmin*)",
-      "Bash(*mariadb *--user=systemadmin*)",
-      "Bash(*mariadb *--user systemadmin*)",
       "Bash(git push * -f*)",
       "Bash(git *reset *--hard*)",
       "Bash(rm -r -f *)",
@@ -29,7 +21,9 @@
       "Bash(*permission_governance_import*)",
       "Bash(*migration*)",
       "Bash(*bootstrap*)",
-      "Bash(./run.sh *)"
+      "Bash(./run.sh *)",
+      "Bash(mariadb *)",
+      "Bash(mysql *)"
     ],
     "allow": [
       "Bash(git status *)",
@@ -43,14 +37,7 @@
       "Bash(rg *)",
       "Bash(grep *)",
       "Bash(scripts/dev/test_fast_isolated.sh *)",
-      "Bash(git branch)",
-      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT CURRENT_USER\")",
-      "Bash(mariadb --user=claude_ro --batch --execute=\"SHOW GRANTS\")",
-      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT * FROM scytaledroid_core_prod.apps LIMIT 1\")",
-      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT * FROM scytaledroid_core_prod.app_versions LIMIT 1\")",
-      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT * FROM scytaledroid_core_prod.static_analysis_runs LIMIT 1\")",
-      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT * FROM scytaledroid_core_prod.static_analysis_findings LIMIT 1\")",
-      "Bash(mariadb --user=claude_ro --batch --execute=\"SELECT * FROM scytaledroid_core_prod.dynamic_sessions LIMIT 1\")"
+      "Bash(git branch)"
     ]
   }
 }

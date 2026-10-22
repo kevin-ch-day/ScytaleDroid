@@ -1,12 +1,12 @@
 # cars2026-verify
 
-Read-only verification of output/paper/android_empirical_alignment_final/.
-If absent in this worktree, inspect the main checkout's bundle without copying/regenerating.
-Locate its checksum manifest; enumerate entries (expect 29) and compute SHA-256.
-Enumerate selected runtime UUIDs from retained CSVs (expect 123); inspect each exact
-run manifest and hash its referenced PCAP. Validate UUID/package/build linkage.
-Resolve historical paths only with an explicit old-root/current-root mapping;
-record both paths. Never choose captures by basename alone or edit manifests.
-Report actual versus expected totals, MATCH/DIFFERS/UNAVAILABLE, missing/duplicate items.
-A missing item is not a match; successful hashes do not establish QA validity.
-Preserve original bytes; any requested report belongs outside frozen bundles.
+Resolve the retained bundle from SCYTALEDROID_PAPER_BUNDLE or ignored local guidance.
+Stop if unavailable; never substitute another experiment or regenerate a bundle.
+Read its manifest and local study notes for expected checksum and runtime populations.
+Compute each referenced SHA-256 and inspect the exact selected runtime manifests and
+PCAPs. Validate UUID/package/build linkage and check duplicates and missing members.
+Resolve relocated paths only with an explicit mapping; record both paths and never
+choose a capture by basename alone. Report MATCH, DIFFERS or UNAVAILABLE per item
+and actual versus expected totals. Successful hashes do not establish QA validity.
+Preserve every original byte. Put results in the configured local report destination,
+never inside a freeze or public guidance. Do not publish cohort IDs by default.
