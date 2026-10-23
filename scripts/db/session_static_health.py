@@ -13,9 +13,8 @@ Exit codes:
   1 - DB error, import failure, empty --session, missing required canonical tables
       for this probe when the session has SAR rows, or canonical query failure
 
-Canonical vs legacy: see ``docs/maintenance/session_identity_contract.md`` and
-``docs/maintenance/session_static_health_hygiene_plan.md``. ``--session`` filters
-``static_analysis_runs.session_stamp``.
+Canonical vs legacy: see ``docs/maintenance/session_identity_contract.md``.
+``--session`` filters ``static_analysis_runs.session_stamp``.
 """
 
 from __future__ import annotations

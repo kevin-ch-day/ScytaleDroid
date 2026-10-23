@@ -90,6 +90,38 @@ any apply path exists:
 - account for brownfield PI catalogs where Erebus migrations may add optional
   columns such as `run_id`, `bucket`, `rule_fired`, or `sha256`
 
+## Ownership and Erebus Boundary
+
+Merged 2026-10 from the former `docs/maintenance/pi_erebus_operational_boundary.md`
+(a decision note, not a migration plan). DDL drift is tracked in
+`docs/database/permission_intel_schema_drift_erebus_vs_scytaledroid.md`.
+
+| Concern | Owner |
+| --- | --- |
+| Static scan results (`static_analysis_*`, permission audit snapshots/apps on the analyst core catalog) | ScytaleDroid |
+| Local permission audit evidence (core tables tied to `static_run_id`) | ScytaleDroid |
+| Dictionary, governance and signal catalog in `android_permission_intel` | Shared catalog: ScytaleDroid reads it for analysis; governance imports and operational tooling live in this repo's documented scripts |
+| Queue rows for unknown/triage permissions (`android_permission_dict_unknown`, `android_permission_dict_queue`) | ScytaleDroid may emit them as described above; they are not static results storage |
+| Global dictionary lifecycle, queue apply workflows, `android_permission_obs_sample` writers, cross-tool classification governance | Erebus / shared PI operational owners; ScytaleDroid must not widen writes without a joint contract |
+
+Unresolved blockers before broader PI writes (especially `obs_sample`):
+
+1. `sample_id` semantics versus the Erebus malware catalog: disjoint allocation
+   or schema evolution is required first.
+2. Producer/subject uniqueness when several tools write the same logical
+   observation stream.
+3. Classifier, `rule_fired` and bucket vocabulary parity with Erebus queue apply.
+4. Who runs queue apply, and how ScytaleDroid-emitted rows reach terminal states
+   without forked semantics.
+5. A cross-repo DDL contract for columns Erebus migrations add that ScytaleDroid
+   introspection must honour.
+
+Non-goals: importing Erebus Python into ScytaleDroid; changing `MANAGED_TABLES`
+or expanding writes without DBA and Erebus sign-off. Update this section when the
+first ScytaleDroid `android_permission_obs_sample` writer lands or is rejected,
+when queue action / `class_action_map` contracts change, or when governance
+import ownership changes.
+
 ## Operational Checks
 
 Use these read-only checks before paper-grade or cross-repo Permission Intel
@@ -110,7 +142,6 @@ live v1 release, schema/catalog digests, and its own semantic digest.
 Related active docs:
 
 - `docs/maintenance/permission_intelligence_pipeline.md`
-- `docs/maintenance/pi_erebus_operational_boundary.md`
 - `docs/database/permission_split_migration_history.md` (historical execution record)
 - `docs/database/permission_intel_schema_drift_erebus_vs_scytaledroid.md`
 - `docs/database/permission_intel_observation_readiness.md`

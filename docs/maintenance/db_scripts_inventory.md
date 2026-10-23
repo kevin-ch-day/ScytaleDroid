@@ -1,6 +1,6 @@
 # `scripts/db/*.py` inventory and integration map
 
-See also **[`scripts_integration_strategy.md`](scripts_integration_strategy.md)** for the broader `scripts/` tree (subtrees, removal candidates, suggested integration order).
+This is the **single** inventory for `scripts/db/`. The lifecycle **Status** column (`keep`, `combine_later`, `archive_later`, …) comes from the `scripts/db` table formerly duplicated in **[`scripts_integration_strategy.md`](scripts_integration_strategy.md)** (merged 2026-10), which still covers the rest of `scripts/`.
 
 Operational scripts under `scripts/db/` are **implementation helpers**. This document classifies each script, states read/write posture, and records the **intended workflow owner** so menus and static pre/post-flight can call or reference them without ad-hoc memory.
 
@@ -33,49 +33,138 @@ Operators still use the existing script paths. Generated caches such as
 `__pycache__/` are safe to remove; tracked script movement needs a replacement
 path and reference update.
 
-| Script | Class | Purpose (short) | Read-only? | DB? | `--help` | Auto-call? | Menu / owner |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `check_permission_intel.py` | G | Validate Intel env, connectivity, governance snapshot rows | yes | Intel DSN | yes | optional CI | `run.sh` / gates; DB Tools → 2 (readiness is item 2) |
-| `permission_intel_readiness.py` | G | Thin CLI wrapper around `permission_intel_readiness` module | yes | Intel | yes | optional | DB Tools → 2 (item 2) |
-| `recreate_web_consumer_views.py` | A / G | Recreate Web consumer **views** (DDL on views) | **writes** DDL | core | yes | posture/semantic workflows | DB maintenance; AGENTS smoke |
-| `view_repair_support.py` | C | Shared helpers for view repair scripts (imported) | n/a | n/a | n/a | no | `recreate_web_consumer_views` |
-| `static_schema_audit.py` | S | Read-only static-related schema inventory | yes | core | yes | CI / doctor | DB Tools / gates |
-| `session_static_health.py` | S | Read-only static session health probe | yes | core | yes | post-run diagnostics menu | **DB Tools → 9 (item 6)**; static post-run → 11 |
-| `audit_static_session.py` | S | Cohort/session audit: counts + Web views + legacy | yes | core (+views) | yes | propose post-run | Static audit; `audit_static_session` |
-| `refresh_static_analysis_sessions.py` | S | Recompute `static_analysis_sessions` rollups | **writes** | core | yes | propose post-run job | DB maintenance |
-| `report_static_session_grain_integrity.py` | S | Grain / `static_session_id` integrity report | yes | core | yes | optional | **DB Tools → 9 (item 7)** |
-| `verify_static_session_id_rollout.py` | S | Scalar counts for session-id rollout | yes | core | yes (`--explain` = stderr legend) | optional | **DB Tools → 9 (item 5)**; post-run → 11 |
-| `check_evidence_storage_posture.py` | G | Snapshot metadata vs pointers; findings hash↔payload | yes | core | yes | optional CI / doctor | scripts/db; DB maintenance |
-| `check_evidence_latest_write_posture.py` | G | Recent-window findings: hash↔payload, inline vs env, web-shaped evidence | yes | core | yes | after fresh static run | operator / DB maintenance |
-| `report_dynamic_static_alignment.py` | G | Dynamic sessions vs canonical static hash alignment + static worklist | yes | core | yes | no | operator triage; dynamic↔static research |
-| `report_apk_lineage_availability.py` | A / G | Package/version/hash/install-set lineage coverage and byte availability | yes | core | yes | no | APK lineage / package coverage |
-| `report_package_lineage_workbench.py` | A | Package-first operator workbench: identity, bytes, static/dynamic coverage, actions | yes | core | yes | no | APK Library → Package Lineage Workbench |
-| `report_static_analysis_targets.py` | A / G | Queue-like read model for hash-driven static targets and block reasons | yes | core | yes | no | APK Library / Static target planning |
-| `report_dynamic_static_recovery_plan.py` | A / G | Exact dynamic/static gap artifact recovery planner; optional JSON receipt | default read; writes receipt with `--write-receipt` | core | yes | no | APK Library / artifact lifecycle planning |
-| `report_dynamic_static_pairing_eligibility.py` | A / G | Read-only dynamic-session eligibility for strict paired analysis vs dynamic-only/reharvest/external-artifact states | yes | core | yes | no | Dataset analysis planning |
-| `report_current_corpus_preflight.py` | A / G | Read-only current-corpus preflight after fresh inventory/harvest: repository rows, canonical store files, apk_sets, split metadata, and static target states | yes | core | yes | no | Current corpus rebuild / harvest preflight |
-| `report_dynamic_paper_freeze_readiness.py` | A | Read-only dynamic cutoff evidence tier and paper-readiness report | yes | core/evidence | yes | no | Paper 3 cutoff evidence source |
-| `report_paper3_writing_package.py` | A | Generate Paper 3 writing bridge/workspace from cutoff evidence | yes | file outputs only | yes | no | Paper 3 writing workspace |
-| `report_dynamic_live_operational_state.py` | G | Read-only live queue/current-build operational state snapshot | yes | core/evidence | yes | no | Dynamic operational vs paper-readiness split |
-| `report_dynamic_retained_evidence_reuse.py` | G | Read-only retained/prior-build evidence reuse report | yes | evidence | yes | no | Paper cutoff caveats / retained evidence |
-| `report_evidence_storage_posture.py` | G | Read-only sizes / dedupe signals (flags, findings, audit) | yes | core | yes | no | operator triage |
-| `probe_finding_evidence_hash_parity.py` | G | Sample SQL vs Python ``evidence_hash`` / mismatch hints | yes | core | yes | no | operator triage before strip-inline |
-| `backfill_static_finding_evidence_payloads.py` | M | Backfill ``evidence_hash`` + payload table; optional strip inline | default read; **writes** with ``--apply`` | core | yes | no | operator / maintenance |
-| `normalize_evidence_hash_collation.py` | M | Narrow safe ALTER helper for finding evidence hash ``ascii_bin`` collation | default read; **writes** with ``--apply`` | core | yes | no | evidence migration maintenance |
-| `backfill_apk_sets_from_receipts.py` | M | Additive install-set spine backfill from receipt-backed harvest artifacts | default read; **writes** with `--apply` | core | yes | no | APK lineage migration helper |
-| `backfill_apk_set_links.py` | M | Backfill nullable `apk_set_id` links where artifact-set hash is unique | default read; **writes** with `--apply` | core | yes | no | APK lineage migration helper |
-| `check_static_run_governance_posture.py` | G | Static run canonical / handoff invariant counts | yes | core | yes | optional CI / doctor | **DB Tools → 9 (item 2)**; shared module `static_run_governance_checks`; gates |
-| `report_artifact_registry_integrity.py` | S | Artifact registry integrity (dangling refs) | yes | core | yes | propose post-run | **DB Tools → 9 (item 3)** |
-| `report_artifact_registry_cleanup_candidates.py` | S | Read-only cleanup policy buckets for `artifact_registry` | yes | core | yes | no | **DB Tools → 9 (item 4)**; post-run → 11 |
-| `prune_artifact_registry_dangling.py` | A | Age-gated dangling registry prune (receipt JSON v1 envelope + CSV/SQL; receipt + `--apply`; DB only) | default dry-run; **writes** with `--apply` | core | yes | never auto | operator / maintenance |
-| `verify_evidence_manifest.py` | S | Filesystem + optional DB evidence manifest parity | mixed | optional | yes | deploy | evidence checks |
-| `validate_canonical_masvs_session.py` | S | MASVS views vs session stamp | yes | core | yes | CI / research | static gates |
-| `audit_static_permission_observation_linkage.py` | S | Matrix → run → SHA linkage audit | yes | core | yes | CI | persistence QA |
-| `audit_permission_intel_queue_compatibility.py` | G | Intel queue compatibility (Scytale vs Erebus) | yes | Intel + core | yes | occasional | governance |
-| `audit_permission_name_casing.py` | G | Permission string casing audit | yes | core + Intel | yes | occasional | governance |
-| `report_app_label_hygiene.py` | A | Catalog: inventory vs `apps.display_name` / focus bucket | yes | core | yes | **preflight summary (counts only)** | **DB Tools → Catalog hygiene → 1** |
-| `apply_app_display_name_overrides.py` | A | Curated CSV → `apps.display_name` (dry-run default) | default read; `--apply` writes | core | yes | never auto | **Catalog hygiene → 2–3** |
+| Script | Class | Purpose (short) | Read-only? | DB? | `--help` | Auto-call? | Menu / owner | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `check_permission_intel.py` | G | Validate Intel env, connectivity, governance snapshot rows | yes | Intel DSN | yes | optional CI | `run.sh` / gates; DB Tools → 2 (readiness is item 2) | keep (explicit list) |
+| `permission_intel_readiness.py` | G | Thin CLI wrapper around `permission_intel_readiness` module | yes | Intel | yes | optional | DB Tools → 2 (item 2) | keep · deprecate_cli later if `python -m` parity |
+| `recreate_web_consumer_views.py` | A / G | Recreate Web consumer **views** (DDL on views) | **writes** DDL | core | yes | posture/semantic workflows | DB maintenance; AGENTS smoke | keep (explicit list) |
+| `view_repair_support.py` | C | Shared helpers for view repair scripts (imported) | n/a | n/a | n/a | no | `recreate_web_consumer_views` | keep (explicit list) |
+| `static_schema_audit.py` | S | Read-only static-related schema inventory | yes | core | yes | CI / doctor | DB Tools / gates | keep |
+| `session_static_health.py` | S | Read-only static session health probe | yes | core | yes | post-run diagnostics menu | **DB Tools → 9 (item 6)**; static post-run → 11 | keep |
+| `audit_static_session.py` | S | Cohort/session audit: counts + Web views + legacy | yes | core (+views) | yes | propose post-run | Static audit; `audit_static_session` | keep (explicit list) |
+| `refresh_static_analysis_sessions.py` | S | Recompute `static_analysis_sessions` rollups | **writes** | core | yes | propose post-run job | DB maintenance | keep (explicit list) |
+| `report_static_session_grain_integrity.py` | S | Grain / `static_session_id` integrity report | yes | core | yes | optional | **DB Tools → 9 (item 7)** | keep (explicit list) |
+| `verify_static_session_id_rollout.py` | S | Scalar counts for session-id rollout | yes | core | yes (`--explain` = stderr legend) | optional | **DB Tools → 9 (item 5)**; post-run → 11 | keep (explicit list) |
+| `check_evidence_storage_posture.py` | G | Snapshot metadata vs pointers; findings hash↔payload | yes | core | yes | optional CI / doctor | scripts/db; DB maintenance | keep |
+| `check_evidence_latest_write_posture.py` | G | Recent-window findings: hash↔payload, inline vs env, web-shaped evidence | yes | core | yes | after fresh static run | operator / DB maintenance | keep |
+| `report_dynamic_static_alignment.py` | G | Dynamic sessions vs canonical static hash alignment + static worklist | yes | core | yes | no | operator triage; dynamic↔static research | keep |
+| `report_apk_lineage_availability.py` | A / G | Package/version/hash/install-set lineage coverage and byte availability | yes | core | yes | no | APK lineage / package coverage | keep · combine_later |
+| `report_package_lineage_workbench.py` | A | Package-first operator workbench: identity, bytes, static/dynamic coverage, actions | yes | core | yes | no | APK Library → Package Lineage Workbench | keep (explicit list) · combine_later |
+| `report_static_analysis_targets.py` | A / G | Queue-like read model for hash-driven static targets and block reasons | yes | core | yes | no | APK Library / Static target planning | keep (explicit list) · combine_later |
+| `report_dynamic_static_recovery_plan.py` | A / G | Exact dynamic/static gap artifact recovery planner; optional JSON receipt | default read; writes receipt with `--write-receipt` | core | yes | no | APK Library / artifact lifecycle planning | keep (explicit list) · combine_later |
+| `report_dynamic_static_pairing_eligibility.py` | A / G | Read-only dynamic-session eligibility for strict paired analysis vs dynamic-only/reharvest/external-artifact states | yes | core | yes | no | Dataset analysis planning | keep · combine_later |
+| `report_current_corpus_preflight.py` | A / G | Read-only current-corpus preflight after fresh inventory/harvest: repository rows, canonical store files, apk_sets, split metadata, and static target states | yes | core | yes | no | Current corpus rebuild / harvest preflight | — |
+| `report_dynamic_paper_freeze_readiness.py` | A | Read-only dynamic cutoff evidence tier and paper-readiness report | yes | core/evidence | yes | no | Paper 3 cutoff evidence source | keep |
+| `report_paper3_writing_package.py` | A | Generate Paper 3 writing bridge/workspace from cutoff evidence | yes | file outputs only | yes | no | Paper 3 writing workspace | keep |
+| `report_dynamic_live_operational_state.py` | G | Read-only live queue/current-build operational state snapshot | yes | core/evidence | yes | no | Dynamic operational vs paper-readiness split | keep |
+| `report_dynamic_retained_evidence_reuse.py` | G | Read-only retained/prior-build evidence reuse report | yes | evidence | yes | no | Paper cutoff caveats / retained evidence | keep |
+| `report_evidence_storage_posture.py` | G | Read-only sizes / dedupe signals (flags, findings, audit) | yes | core | yes | no | operator triage | keep |
+| `probe_finding_evidence_hash_parity.py` | G | Sample SQL vs Python ``evidence_hash`` / mismatch hints | yes | core | yes | no | operator triage before strip-inline | keep |
+| `backfill_static_finding_evidence_payloads.py` | M | Backfill ``evidence_hash`` + payload table; optional strip inline | default read; **writes** with ``--apply`` | core | yes | no | operator / maintenance | keep |
+| `normalize_evidence_hash_collation.py` | M | Narrow safe ALTER helper for finding evidence hash ``ascii_bin`` collation | default read; **writes** with ``--apply`` | core | yes | no | evidence migration maintenance | keep |
+| `backfill_apk_sets_from_receipts.py` | M | Additive install-set spine backfill from receipt-backed harvest artifacts | default read; **writes** with `--apply` | core | yes | no | APK lineage migration helper | keep · archive_later after rollout |
+| `backfill_apk_set_links.py` | M | Backfill nullable `apk_set_id` links where artifact-set hash is unique | default read; **writes** with `--apply` | core | yes | no | APK lineage migration helper | keep · archive_later after rollout |
+| `check_static_run_governance_posture.py` | G | Static run canonical / handoff invariant counts | yes | core | yes | optional CI / doctor | **DB Tools → 9 (item 2)**; shared module `static_run_governance_checks`; gates | keep |
+| `report_artifact_registry_integrity.py` | S | Artifact registry integrity (dangling refs) | yes | core | yes | propose post-run | **DB Tools → 9 (item 3)** | keep |
+| `report_artifact_registry_cleanup_candidates.py` | S | Read-only cleanup policy buckets for `artifact_registry` | yes | core | yes | no | **DB Tools → 9 (item 4)**; post-run → 11 | keep |
+| `prune_artifact_registry_dangling.py` | A | Age-gated dangling registry prune (receipt JSON v1 envelope + CSV/SQL; receipt + `--apply`; DB only) | default dry-run; **writes** with `--apply` | core | yes | never auto | operator / maintenance | keep |
+| `verify_evidence_manifest.py` | S | Filesystem + optional DB evidence manifest parity | mixed | optional | yes | deploy | evidence checks | keep |
+| `validate_canonical_masvs_session.py` | S | MASVS views vs session stamp | yes | core | yes | CI / research | static gates | keep |
+| `audit_static_permission_observation_linkage.py` | S | Matrix → run → SHA linkage audit | yes | core | yes | CI | persistence QA | keep |
+| `audit_permission_intel_queue_compatibility.py` | G | Intel queue compatibility (Scytale vs Erebus) | yes | Intel + core | yes | occasional | governance | keep |
+| `audit_permission_name_casing.py` | G | Permission string casing audit | yes | core + Intel | yes | occasional | governance | keep |
+| `report_app_label_hygiene.py` | A | Catalog: inventory vs `apps.display_name` / focus bucket | yes | core | yes | **preflight summary (counts only)** | **DB Tools → Catalog hygiene → 1** | keep (explicit list) |
+| `apply_app_display_name_overrides.py` | A | Curated CSV → `apps.display_name` (dry-run default) | default read; `--apply` writes | core | yes | never auto | **Catalog hygiene → 2–3** | keep (explicit list) |
+| `smoke_web_db.sh` | A | Web DB smoke against the deployed Web tree | yes | core | n/a | deploy | AGENTS smoke; `tests/database/test_web_db_scripts.py` | keep (explicit list) |
+| `scytaledroid_doctor.sh` | A | One-shot operator doctor bundle | yes | core / Intel | n/a | operator | `scripts/db/README.md` | keep (same contract as doctor path above) |
+| `run_permission_intel_scytale_s2_readiness_audit.sh` | G | Bundled read-only PI readiness checks | yes | core + Intel | n/a | bundle smoke | PI readiness docs | keep |
 > Note: `scripts/db/__init__.py` is package metadata only (class **C**).
+
+## Not yet classified (listed 2026-10-22)
+
+These 75 scripts exist under `scripts/db/` but had no row in either former inventory.
+**Purpose** is the first sentence of each script's own docstring. **Write signal**
+is a mechanical scan of the source (an `--apply` / `--execute` flag, DML/DDL text,
+or file writes); it is a hint, not a review. Give a script a Class and Status in
+the main table when you next touch it.
+
+| Script | Purpose (docstring) | Write signal |
+| --- | --- | --- |
+| `_bundle_report_cli.py` | Shared CLI glue for read-only bundle-style DB audit scripts. | no write signal found |
+| `_dynamic_service_seed_overlay.py` | Read-only helpers to overlay repo seed rows onto DB-backed service audits. | no write signal found |
+| `apply_dynamic_session_qfg_schema.py` | Apply the additive dynamic-session QFG metadata migration. | dry-run default; writes with `--apply` |
+| `audit_dynamic_evidence_path_migration.py` | Audit or normalize DB paths after dynamic evidence moved under data/. | dry-run default; writes with `--apply` |
+| `backfill_artifact_registry_session_stamp.py` | Backfill static ``artifact_registry.session_stamp`` from canonical static runs. | dry-run default; writes with `--apply` |
+| `backfill_artifact_registry_typed_linkage.py` | Backfill typed ``artifact_registry`` linkage columns without deleting rows. | dry-run default; writes with `--apply` |
+| `backfill_dynamic_domain_context.py` | Apply and backfill DB-backed dynamic domain context from local evidence packs. | dry-run default; writes with `--apply` |
+| `backfill_dynamic_security_surface.py` | Backfill security_surface.json and security_review.md for dynamic evidence packs. | dry-run default; writes with `--apply` |
+| `backfill_dynamic_service_context.py` | Apply and seed DB-backed dynamic service/provider context tables. | dry-run default; writes with `--apply` |
+| `backfill_dynamic_service_signals.py` | Apply and seed DB-backed dynamic service signal tables. | dry-run default; writes with `--apply` |
+| `backfill_phase_a_typed_replacements.py` | Apply Phase A additive typed replacement columns and conservative backfill. | dry-run default; writes with `--apply` |
+| `backfill_static_report_findings_fidelity.py` | Backfill missing ``metadata.findings_fidelity`` on archived static report JSON. | dry-run default; writes with `--apply` |
+| `backup_production_databases.sh` | Create a non-secret, logical backup baseline for the two ScytaleDroid production catalogs. | reads DB; writes backup files outside the repo |
+| `dedupe_artifact_registry_static_dep_snapshots.py` | Deduplicate static ``dep_snapshot`` artifact_registry rows (DB only; no file deletes). | dry-run default; writes with `--apply` |
+| `migrate_dynamic_domain_normalization.py` | Audit or apply versioned dynamic root-domain normalization. | dry-run default; writes with `--apply` |
+| `migrate_install_set_hash_version_propagation.py` | Audit or apply 0.3.17 install-set hash-version propagation. | dry-run default; writes with `--apply` |
+| `normalize_static_finding_evidence_payload_schema.py` | Normalize live ``static_finding_evidence_payloads`` schema drift. | dry-run default; writes with `--apply` |
+| `normalize_static_session_run_links_schema.py` | Normalize live ``static_session_run_links`` schema drift. | dry-run default; writes with `--apply` |
+| `phase_b1_join_key_normalization.py` | Phase B1 join-key collation/width normalization preflight and apply entrypoint. | dry-run default; writes with `--apply` |
+| `phase_b1_session_stamp_backlog.py` | Phase B1 session-stamp backlog normalization preflight and apply entrypoint. | dry-run default; writes with `--apply` |
+| `provision_new_system_databases.sh` | Provision and verify the local ScytaleDroid database operator. | dry-run default; writes with `--execute`/`--live` |
+| `prune_artifact_registry_dynamic_detached.py` | Receipt-first prune for detached dynamic ``artifact_registry`` rows only. | dry-run default; writes with `--apply` |
+| `prune_artifact_registry_static_detached.py` | Receipt-first prune for detached static ``artifact_registry`` rows only. | dry-run default; writes with `--apply` |
+| `prune_artifact_registry_static_file_present_resolved.py` | Receipt-first registry cleanup for exact-hash file-present static rows. | dry-run default; writes with `--apply` |
+| `prune_artifact_registry_static_file_present_reviewed.py` | Receipt-first prune for reviewed file-present detached static registry rows. | dry-run default; writes with `--apply` |
+| `prune_artifact_registry_static_legacy_sessions.py` | Receipt-first prune for candidate static legacy-overlap sessions. | dry-run default; writes with `--apply` |
+| `prune_failed_static_sessions.py` | Prune superseded failed static-analysis sessions (dry-run by default). | dry-run default; writes with `--apply` |
+| `reconcile_stale_static_run.py` | Inspect or close one abandoned STARTED static run with no persisted child evidence. | dry-run default; writes with `--apply` |
+| `refresh_external_sdk_tracker_intel.py` | Refresh repo-owned external SDK / tracker intel from the Exodus public API. | dry-run default; writes with `--apply` |
+| `repair_dynamic_aborted_discard_acceptance.py` | Explicitly accept a technically valid dynamic run that was accidentally discarded. | dry-run default; writes with `--apply` |
+| `repair_dynamic_dataset_validity_from_artifacts.py` | Repair stale dynamic dataset validity and policy-derived manifest fields. | dry-run default; writes with `--apply` |
+| `repair_dynamic_dataset_validity_from_db_issues.py` | Repair legacy dynamic session validity from DB issue payloads. | dry-run default; writes with `--apply` |
+| `repair_dynamic_evidence_pipeline.py` | Run the staged dynamic evidence repair pipeline. | dry-run default; writes with `--apply` |
+| `repair_dynamic_pcap_artifact_registration.py` | Plan or apply non-destructive PCAP artifact registration repairs. | dry-run default; writes with `--apply` |
+| `report_artifact_registry_dynamic_dangling.py` | Read-only audit of dangling dynamic ``artifact_registry`` rows. | read DB; writes report files |
+| `report_artifact_registry_static_blocked_file_presence.py` | Read-only file-presence correlation for blocked static legacy-overlap sessions. | no write signal found |
+| `report_artifact_registry_static_dangling.py` | Read-only audit of dangling static ``artifact_registry`` rows. | read DB; writes report files |
+| `report_artifact_registry_static_detached.py` | Read-only report for detached static ``artifact_registry`` prune candidates. | no write signal found |
+| `report_artifact_registry_static_file_present_detached.py` | Read-only review queue for file-present detached static registry rows. | no write signal found |
+| `report_artifact_registry_static_legacy_overlap.py` | Read-only audit of static dangling rows that still overlap legacy mirror tables. | no write signal found |
+| `report_artifact_registry_static_session_retirement.py` | Read-only session-scoped retirement proposal for remaining static dangling legacy-overlap rows. | no write signal found |
+| `report_artifact_registry_typed_linkage_audit.py` | Read-only typed-linkage audit for ``artifact_registry``. | no write signal found |
+| `report_canonical_schema_map.py` | Generate a read-only canonical schema map for ``scytaledroid_core_prod``. | read DB; writes report files |
+| `report_dynamic_deep_audit.py` | Read-only deep audit over dynamic evidence quality, readiness, and static guidance gaps. | read DB; writes report files |
+| `report_dynamic_domain_context.py` | Read-only domain-context report over dynamic evidence packs. | read DB; writes report files |
+| `report_dynamic_domain_ml_context.py` | Read-only ML/context export for dynamic runtime domains and destinations. | read DB; writes report files |
+| `report_dynamic_hidden_patterns.py` | Read-only hidden-pattern exports joining static Android surface with dynamic evidence packs. | read DB; writes report files |
+| `report_dynamic_interaction_phases.py` | Read-only export of scripted interaction phases and phase-aware packet summaries. | read DB; writes report files |
+| `report_dynamic_legacy_corpus.py` | Read-only inventory of modern and legacy dynamic evidence for governance/reporting. | read DB; writes report files |
+| `report_dynamic_lineage_audit.py` | Read-only audit of dynamic evidence lineage across current and historical app builds. | read DB; writes report files |
+| `report_dynamic_paper_exports.py` | Read-only paper-facing exports over dynamic evidence packs and enriched PCAP metadata. | read DB; writes report files |
+| `report_dynamic_pcap_behavior_ml.py` | Read-only behavioral analysis over dynamic PCAP-derived features. | read DB; writes report files |
+| `report_dynamic_pcap_cohort_understanding.py` | Synthesize PCAP understanding across all dynamic evidence packs (filesystem-first). | read DB; writes report files |
+| `report_dynamic_pcap_payload_audit.py` | Read-only, privacy-preserving payload-surface audit for dynamic PCAPs. | read DB; writes report files |
+| `report_dynamic_pcap_security_cohort.py` | Cohort PCAP security analysis from cached security_surface artifacts (no tshark). | dry-run default; writes with `--apply` |
+| `report_dynamic_port_context.py` | Read-only runtime port-context report from dynamic PCAP summaries. | read DB; writes report files |
+| `report_dynamic_readiness_audit.py` | Read-only audit of static-to-dynamic readiness and evidence continuity. | read DB; writes report files |
+| `report_dynamic_service_context.py` | Read-only report over dynamic service/provider context and observed runtime domains. | read DB; writes report files |
+| `report_dynamic_service_signals.py` | Read-only report over dynamic privacy/security/context signals derived from service context. | read DB; writes report files |
+| `report_dynamic_tls_fingerprint_audit.py` | Read-only audit of TLS fingerprint population and diversity across dynamic evidence. | read DB; writes report files |
+| `report_dynamic_unresolved_domains.py` | Read-only triage report for unresolved dynamic domains. | read DB; writes report files |
+| `report_external_tracker_context.py` | Read-only package-level tracker context overlap from external tracker intel. | read DB; writes report files |
+| `report_harvest_path_stale_audit.py` | Read-only audit of harvest path-stale behavior from artifact evidence. | read DB; writes report files |
+| `report_multimodal_static_dynamic_ml.py` | Read-only fused static + dynamic + PCAP behavioral analysis. | read DB; writes report files |
+| `report_pcap_observer_audit.py` | Read-only PCAP observer audit across dynamic evidence packs. | read DB; writes report files |
+| `report_phase_a_typed_read_parity.py` | Read-only parity audit for Phase A typed replacement read paths. | no write signal found |
+| `report_schema_migrations.py` | Read-only report over schema migration governance state. | no write signal found |
+| `report_static_deep_audit.py` | Read-only deep audit over static evidence quality, readiness, and bridge gaps. | read DB; writes report files |
+| `report_static_exposure_analytics.py` | Experimental static exposure analytics bundle (read-only, no DML/DDL). | read DB; writes report files |
+| `report_static_findings_fidelity_audit.py` | Read-only audit of static findings fidelity for one session. | read DB; writes report files |
+| `report_static_run_performance_audit.py` | Read-only audit of static-session performance and split-evidence value. | read DB; writes report files |
+| `report_static_string_dynamic_corroboration.py` | Read-only audit of static string enrichment vs dynamic network evidence. | read DB; writes report files |
+| `report_type_normalization_preflight.py` | Read-only Phase A preflight for schema type normalization. | no write signal found |
+| `retire_missing_dynamic_evidence_runs.py` | Stage or apply DB-only retirement for missing dynamic evidence runs. | dry-run default; writes with `--apply` |
+| `schema_version_width_hotfix.py` | Runtime schema_version width hotfix preflight and apply entrypoint. | dry-run default; writes with `--apply` |
 
 ## Consolidation candidates
 

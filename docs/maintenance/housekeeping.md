@@ -37,7 +37,7 @@ only. Do not rely on retention as a correctness mechanism for paper-grade runs.
 default logs live under `./logs/` with paired human-readable and JSONL streams
 (where configured) so you can tail text locally or feed structured events to tooling.
 
-**Source of truth:** `scytaledroid/Utils/LoggingUtils/logging_engine.py` (`LOG_CONFIGS`). If this table disagrees with code, code wins — see `docs/maintenance/logs_operator_hygiene_plan.md`.
+**Source of truth:** `scytaledroid/Utils/LoggingUtils/logging_engine.py` (`LOG_CONFIGS`). If this table disagrees with code, code wins. The root path is `app_config.LOGS_DIR` → `logging_core.LOG_DIR`; `list_log_files()` gives the resolved map.
 
 | Category         | Human readable          | Structured JSONL               |
 |------------------|-------------------------|--------------------------------|
@@ -57,7 +57,27 @@ default logs live under `./logs/` with paired human-readable and JSONL streams
 
 **Third-party debug:** androguard deep logs may land under `logs/third_party/` (e.g. `androguard.<run_id>.log`) when verbosity demands it — not the same channels as the table above.
 
-**Script vocabulary:** some operator scripts glob `logs/harvest_runs/` — treat **`logs/harvest/`** as the canonical per-run directory; path aliases vary by script age.
+**Script vocabulary:** some operator scripts glob `logs/harvest_runs/` — treat **`logs/harvest/`** as the canonical per-run directory; path aliases vary by script age. (`list_log_files()` exposes the key `harvest_runs` as the directory `logs/harvest/`.) The root `harvest.log` / `harvest.jsonl` is the process-wide channel; `logs/harvest/` holds per-run files. Both are intentional.
+
+### What logs are evidence for
+
+*Merged 2026-10 from the former `logs_operator_hygiene_plan.md` (P1/P2 operator hygiene; no logging redesign, no automatic deletion, no retention change without a separate RFC).*
+
+| Stream | Role |
+| --- | --- |
+| `error.log` | Diagnostics — hard-error funnel; tail it when something failed. |
+| `app.log` / `app.jsonl` | Diagnostics + light evidence (env, lifecycle). Not canonical run output. |
+| `static_analysis.log` / `.jsonl` | Supporting evidence — `REPORT_SAVED`, persistence events, session stamps; correlates DB and disk. Not canonical versus `static_analysis_runs` or archive JSON. |
+| `db.log` / `.jsonl` | Diagnostics — keeps DB tooling noise apart from the scanner narrative. |
+| `device_analysis` / `harvest` (root + per-run) | Supporting evidence — per-run files are often enough to reconstruct harvest-side issues without re-pulling. Not a substitute for receipts or evidence packs. |
+| `dynamic_analysis.*` | Supporting evidence — canonical dynamic truth is still the evidence packs (and the DB index). |
+| `audit.log` / `.jsonl` | Supporting evidence — may overlap `output/audit/` JSON; correlate, don't treat as truth. |
+| `metrics.jsonl` | Telemetry — not the legacy SQL `metrics` table, detector metrics or ML metrics. |
+| `logs/third_party/*.log` | Diagnostics only — parser noise; never publication evidence. |
+
+**Reconstructing a run:** DB canonical rows and `output/` / `data/` artifacts (reports, persistence audits, selection manifests) first; then grep `static_analysis` / `db` logs by `session_stamp` / `static_run_id`. Logs fill gaps; they do not replace manifests or the DB.
+
+**Safe to clean (operator decision only):** once evidence packs, persistence audit JSON, archive JSON and any retained DB are archived, old rotated `.gz` files and old per-harvest files are usually safe to delete locally.
 
 The same helper also reminds operators where device state and static-analysis
 report directories live so they can inspect or archive them manually when

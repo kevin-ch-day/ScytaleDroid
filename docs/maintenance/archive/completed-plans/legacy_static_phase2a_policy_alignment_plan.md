@@ -32,4 +32,3 @@ python -m py_compile scytaledroid/Database/db_utils/action_groups/status_actions
 
 - [legacy_static_reader_dependency_map.md](../../legacy_static_reader_dependency_map.md) — authoritative reader map and **§8** follow-ups.
 - [legacy_static_deprecation_playbook.md](../../legacy_static_deprecation_playbook.md) — phased exit; **DDL last**.
-- [legacy_static_tables_consumer_audit.md](../../legacy_static_tables_consumer_audit.md) — one-page index (tables in scope + pointers).

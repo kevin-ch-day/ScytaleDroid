@@ -2,6 +2,7 @@
 
 **Archived:** moved from `docs/maintenance/next_pass_docs_policy_implementation_plan.md` (documentation Wave W1).  
 **Date:** 2026-05-09  
+**Later merges (2026-10):** `session_static_health_hygiene_plan.md` → `session_identity_contract.md`; `pi_erebus_operational_boundary.md` → `docs/database/permission_intel_contract.md`; `static_schema_table_inventory.md` → `static_database_schema_audit_plan.md`. Paths below are as originally created.  
 **Scope:** documentation and policy alignment only — **no** application logic, schema, Web repo, `metrics` migration, `risk_actions`, `views_bridge`, or reset changes in this slice.
 
 ---
@@ -11,7 +12,7 @@
 | # | Deliverable | Artifact |
 | --- | --- | --- |
 | 1 | Session identity contract | `docs/maintenance/session_identity_contract.md` |
-| 2 | Risk scoring policy wording | Updates to `docs/database/static_schema_table_inventory.md`, `docs/persistence.md`, `docs/maintenance/permission_intelligence_pipeline.md`, `docs/maintenance/operator_acceptance_matrix.md` |
+| 2 | Risk scoring policy wording | Updates to `docs/database/static_schema_table_inventory.md` (since merged into `static_database_schema_audit_plan.md`), `docs/persistence.md`, `docs/maintenance/permission_intelligence_pipeline.md`, `docs/maintenance/operator_acceptance_matrix.md` |
 | 3 | `session_static_health.py` hygiene **plan** (no script logic) | `docs/maintenance/session_static_health_hygiene_plan.md` |
 | 4 | Evidence manifest **design** (no writer) | `docs/maintenance/evidence_run_manifest_spec.md` |
 | 5 | PI / Erebus boundary memo | `docs/maintenance/pi_erebus_operational_boundary.md` |

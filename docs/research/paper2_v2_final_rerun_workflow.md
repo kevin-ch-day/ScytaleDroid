@@ -2,6 +2,15 @@
 
 Use this only after collection is explicitly complete. Do not run this during optional collection.
 
+> **Writes into existing evidence.** Menu option 2 writes a new timestamped freeze
+> and replaces the canonical `dataset_freeze.json` in the active cohort's folder under
+> `data/archive/research_cohorts/`. Option 3 writes ML files inside every included
+> evidence pack, and first deletes a pack's existing ML files when they were built
+> from a different freeze. Some of those packs may also belong to other frozen
+> studies. Copy the affected packs and cohort folder first, and confirm the active
+> cohort is the intended one: when no cohort is pinned, the ML menu selects the
+> largest active cohort.
+
 ## Purpose
 
 Produce the final submission lock once, regenerate all Paper 2 v2 outputs, and compare the final package with the preserved 114-run checkpoint.

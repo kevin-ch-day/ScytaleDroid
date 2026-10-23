@@ -236,5 +236,5 @@ the core cleanup acceptance criteria.
 
 | Priority | Item | Notes |
 | --- | --- | --- |
-| **P1** | Logs doc ↔ code parity | `housekeeping.md` aligned to `LOG_CONFIGS`; full mismatch list and evidence taxonomy in `logs_operator_hygiene_plan.md` |
+| **P1** | Logs doc ↔ code parity | `housekeeping.md` aligned to `LOG_CONFIGS`; log evidence roles in `housekeeping.md` ("What logs are evidence for") |
 | **P2 — complete** | Read-only `logs health` report | Implemented in `scripts/operator/logs_health.py` and the Evidence & Workspace menu; reports total/category size, `.gz` rotation, largest files, and stale flags; **no auto-delete** |

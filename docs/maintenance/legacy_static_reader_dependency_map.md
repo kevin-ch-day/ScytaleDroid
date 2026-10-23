@@ -16,7 +16,7 @@
   - `metrics`
   - `buckets`
   - `contributors`
-- **This Python repo only** (`scytaledroid/`, `scripts/`, `tests/`, `docs/` where they cite SQL). The Web repo is out of scope here.
+- **This Python repo** (`scytaledroid/`, `scripts/`, `tests/`, `docs/` where they cite SQL) in §2–§8. The Web repo's consumers are summarised in §9.
 
 ### Method
 
@@ -29,7 +29,7 @@
 ### Out of scope for this file
 
 - Canonical writers (`static_analysis_runs`, `static_analysis_findings`, etc.) except where they interact with legacy reads.
-- Permission Intel, Erebus, and Web SQL (see separate audits / playbook).
+- Permission Intel and Erebus SQL.
 
 ---
 
@@ -50,6 +50,10 @@ rg 'INSERT INTO (runs|findings|metrics|buckets|contributors)\b' scytaledroid --g
 - `metrics`
 - `buckets`
 - `contributors`
+
+**Registry:** `scytaledroid/Database/db_utils/bridge_posture.py` records `current_writers=()` for each legacy-five row; its `current_readers` tuples are illustrative and lag this map.
+
+**Older classification legend** (seen in older PRs and `static_schema_audit.py` output): `1` active reader · `2` writer · `3` tests · `4` docs · `5` reset/cleanup · `6` compatibility/registry · `7` unknown.
 
 **Interpretation:** Static persistence in current sources does not insert into these tables. Rows may still exist from **older binaries**, **external tools**, or **historical** pipelines. **Admin/reset** paths may **DELETE** or **TRUNCATE** these tables (see playbook Phase 4); that is not an `INSERT` and is documented separately.
 
@@ -264,7 +268,7 @@ Order is **for planning PRs**; each step needs its own tests and grep verificati
 
 ### 5.4 Web blockers
 
-- **None tracked in this Python repo** for the legacy five; Web consumption is covered separately (`legacy_static_tables_web_deep_dive.md`). Treat Web as a **parallel** exit criterion before DDL.
+- **None tracked in this Python repo** for the legacy five; Web consumption is covered in §9. Treat Web as a **parallel** exit criterion before DDL.
 
 ### 5.5 Schema / DDL blockers
 
@@ -375,11 +379,34 @@ Second-pass checks against greps, `static_database_schema_audit_plan.md`, `legac
 
 ---
 
+## 9. Web repo consumers (checkpoint)
+
+*Merged from the former `legacy_static_tables_web_deep_dive.md`. Read from the deployed Web tree (`/var/www/html/ScytaleDroid-Web`), which is not part of this repo. No Web code was changed.*
+
+**Verdict:** the Web layer is **not** a major blocker. Its only legacy base-table SQL is one diagnostic `runs` count.
+
+- **Read contract:** `v_web_*` views (`v_web_app_directory`, `v_web_app_sessions`, `v_web_app_findings`, `v_web_static_session_health`, `v_web_runtime_run_index`) built from this repo (`recreate_web_consumer_views.py`), plus the `vw_static_finding_surfaces_latest` / `vw_static_risk_surfaces_latest` rollups. Web is SELECT-only.
+- **Direct base tables** appear only where the UI needs joins the views do not wrap: `static_analysis_runs`, `static_analysis_findings`, `static_findings_summary`, `static_string_summary`, `static_fileproviders`, `apps` / `app_versions`, `permission_audit_snapshots`, and dynamic tables.
+- **Findings Explorer** (`SQL_FINDINGS_EXPLORER_*`) reads `v_web_app_findings`; the per-app list (`SQL_APP_FINDINGS_LIST`) reads `static_analysis_findings` ⋈ `static_analysis_runs` ⋈ `apps`. Session health uses `v_web_static_session_health`; the quality rollup aggregates `static_analysis_runs` only.
+- **The one legacy hit:** `SQL_DIAG_COUNTS` in `database/db_lib/db_queries.php` runs `(SELECT COUNT(*) FROM runs) AS runs` beside `static_runs`. It feeds `app_diagnostics()` and `pages/diag.php`, which return 404 unless `SCYTALEDROID_WEB_ENABLE_DIAG` is set or the request is from localhost.
+- **No** Web SQL depends on legacy `findings`, `metrics`, `buckets` or `contributors` under a tight `FROM`/`JOIN` grep. The Web README's required `static_findings_summary` / `static_findings` are derived baseline tables, not the legacy mirror.
+
+**Grep false trails in the Web tree:**
+
+| Trail | Why it is not legacy use |
+| --- | --- |
+| `LEFT JOIN vw_static_finding_surfaces_latest findings` | `findings` is a table **alias** for the view |
+| `$runs`, "runs" in dynamic pages | Dynamic sessions (`dynamic_sessions`, `v_web_runtime_run_index`) |
+| Hits under `.github/`, CSS, PHP names | Require a `database/` path and a `\b(FROM|JOIN|INTO)\s+` prefix |
+
+**Optional later Web-only cleanup:** rename the diagnostic key `runs` to `legacy_runs_total` and `static_runs` to `canonical_static_runs_total`. Not required for any checkpoint.
+
+---
+
 ## Related documents
 
 - [legacy_static_deprecation_playbook.md](legacy_static_deprecation_playbook.md) — phased exit; this map feeds **Phase 2–3**.
 - [archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md](archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md) — **completed** policy record + verification commands (stub).
-- [legacy_static_tables_consumer_audit.md](legacy_static_tables_consumer_audit.md) — **index page** (baseline grep + pointers); per-table matrices live in **this doc §3**.
 - [static_database_schema_audit_plan.md](static_database_schema_audit_plan.md) — schema inventory semantics.
 - [legacy_static_deprecation_playbook.md](legacy_static_deprecation_playbook.md#legacy-static-table-compatibility-appendix) — relabel vs migrate buckets (**Appendix A**, merged from the former reduction plan doc).
 
