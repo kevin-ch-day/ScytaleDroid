@@ -65,7 +65,7 @@ def test_backup_helper_mount_defaults_to_v2(tmp_path: Path) -> None:
     mount, uuid, root = _resolved_mercury_settings(tmp_path, env_lines="# SCYTALEDROID_MERCURY_MOUNTPOINT=/x\n", environ={})
 
     assert mount == "/mnt/MERCURY_DATA_V2"
-    assert uuid == "715f29a9-2671-477b-8c8d-515d190addb9"
+    assert uuid == ""
     assert root == "/mnt/MERCURY_DATA_V2/mercury_backups"
 
 
@@ -89,6 +89,13 @@ def test_backup_helper_mount_environment_overrides_dotenv(tmp_path: Path) -> Non
     )
 
     assert mount == "/srv/mercury"
+
+
+def test_backup_helper_requires_uuid_setting() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "DEFAULT_MERCURY_UUID" not in source
+    assert '[[ -n "$MERCURY_UUID" ]] || die' in source
 
 
 def test_backup_helper_checks_active_mount_before_uuid() -> None:

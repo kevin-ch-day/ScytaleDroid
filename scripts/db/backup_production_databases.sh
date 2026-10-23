@@ -10,10 +10,9 @@ umask 077
 readonly REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly ENV_FILE="${REPO_ROOT}/.env"
 readonly DEFAULT_MERCURY_MOUNT="/mnt/MERCURY_DATA_V2"
-readonly DEFAULT_MERCURY_UUID="715f29a9-2671-477b-8c8d-515d190addb9"
 
 # Non-secret Mercury settings: process environment first, then a literal .env
-# line, then the built-in default.  Never sources .env.
+# line, then the built-in default (the UUID has none).  Never sources .env.
 optional_setting() {
     local key="$1" default="$2" value=""
     value="${!key:-}"
@@ -35,7 +34,7 @@ optional_setting() {
 
 MERCURY_MOUNT="$(optional_setting SCYTALEDROID_MERCURY_MOUNTPOINT "$DEFAULT_MERCURY_MOUNT")"
 MERCURY_MOUNT="${MERCURY_MOUNT%/}"
-MERCURY_UUID="$(optional_setting SCYTALEDROID_MERCURY_UUID "$DEFAULT_MERCURY_UUID")"
+MERCURY_UUID="$(optional_setting SCYTALEDROID_MERCURY_UUID "")"
 readonly MERCURY_MOUNT MERCURY_UUID
 readonly APPROVED_ROOT="${MERCURY_MOUNT}/mercury_backups"
 readonly CORE_DB="scytaledroid_core_prod"
@@ -88,6 +87,7 @@ env_value() {
 assert_mercury_mount() {
     local mounted_uuid
     [[ "$MERCURY_MOUNT" == /?* ]] || die "SCYTALEDROID_MERCURY_MOUNTPOINT must be an absolute path"
+    [[ -n "$MERCURY_UUID" ]] || die "set SCYTALEDROID_MERCURY_UUID in .env or the environment (the Mercury filesystem UUID)"
     mountpoint -q -- "$MERCURY_MOUNT" || die "Mercury mountpoint is not an active mount: ${MERCURY_MOUNT}"
     mounted_uuid="$(findmnt -no UUID --mountpoint "$MERCURY_MOUNT" 2>/dev/null | tail -n 1 || true)"
     [[ "$mounted_uuid" == "$MERCURY_UUID" ]] || die "Mercury is not mounted at ${MERCURY_MOUNT} with expected UUID"
