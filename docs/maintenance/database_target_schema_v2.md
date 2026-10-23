@@ -2,7 +2,7 @@
 
 **Status:** normative **target** design — **session header tables implemented** in `canonical/schema.py` (and on some catalogs in production); run FKs, v2 views, and permission split remain **planned**.  
 **Intent:** MariaDB becomes the **primary query surface** for Web and operators for static (and bounded dynamic) truth; JSON and filesystem paths remain **evidence and reproducibility**, not the authoritative catalog.  
-**Supersedes as architecture direction:** patch-level notes in [database_schema_cleanup_design.md](database_schema_cleanup_design.md) remain useful for near-term tactics; **this document** defines the **better schema** end state and migration spine.
+**Absorbed:** the former `database_schema_cleanup_design.md` (2026-05-09 tactics proposal). Its non-duplicated content — evidence baseline, hygiene heuristics, the `use_biometric` diagnosis, prune order and staged SQL layout — is **Appendix F**. Its session columns, disposition table and Web source-of-truth sections were already covered by Sections 2, 5 and 6 here.
 
 **Constraints for all phases until explicitly approved:** no fake repair of broken historical sessions; no detector semantic changes as part of schema work (persistence/normalization layers may change); destructive SQL only in late phases with backup, preview, and verify.
 
@@ -600,9 +600,68 @@ HAVING c > 1;
 
 ---
 
+## Appendix F — Near-term tactics (from the former cleanup design)
+
+*Merged 2026-10 from `database_schema_cleanup_design.md` (written 2026-05-09). The session header, disposition model and Web views it proposed are now Sections 2, 5, 6 and Appendix A0; only the parts not covered there are kept. The proposed `scripts/db/session_hygiene_report.py` was never created: `scripts/db/refresh_static_analysis_sessions.py`, `scripts/db/session_static_health.py` and the `v_static_session_cleanup_candidates_v2` / `v_static_session_supersession_candidates_v1` views cover that ground.*
+
+### F.1 Evidence baseline (operator DB, May 2026 — recompute before acting)
+
+| Session | Shape | Notes |
+| --- | --- | --- |
+| `20260511-all-full` | Interrupted partial | Many `FAILED` + `user_abort` / `SIGINT`; partial findings/permission rows; no session links or rollups — expected when finalize never ran. |
+| `20260509-all-full` | Mixed | Completed + failed; at least one real `static_persistence_failures` row (`permission_risk.write`, duplicate canonical permission). |
+| `20260429-all-full` | Broken historical | Mostly `persist_error`, near-zero findings — **do not backfill**; prune candidate only after export + supersession. |
+
+**`is_canonical` on `static_analysis_runs`** behaves as a per-`session_label` "representative winner" (one `is_canonical=1` per session), not package-level truth for all time. Do not overload it for session summaries.
+
+### F.2 Disposition heuristics (aggregate the per-run `v_web_app_sessions` usability to the session)
+
+- Any `static_persistence_failures` rows for the session's runs → lean `mixed_*` or `broken_persist_error_session`, depending on prevalence.
+- Failed runs mostly `abort_reason=user_abort` and zero links → `interrupted_partial_session`.
+- Failed runs mostly `persist_error` with findings ≈ 0 → `broken_persist_error_session` / `legacy_historical_session`.
+- Report `high` / `medium` / `low` confidence when signals disagree (for example an interrupt plus one persistence row).
+
+### F.3 `use_biometric`-style duplicate permission failures
+
+`static_permission_risk_vnext` enforces `UNIQUE (run_id, permission_name)`, and `_persist_permission_risk_vnext` dedupes on `perm.lower()` (logging `duplicate_permission_skipped`). A DB duplicate error can still surface because of:
+
+1. **Collation mismatch** — the unique index compares differently from Python `lower()` (Unicode, dotless i, pad-space edges).
+2. **A second writer** — for example the `risk_actions.py` backfill using `LOWER(spm.permission_name)` under a different collation.
+3. **Matrix vs risk uniqueness** — two matrix fact rows that are distinct in `static_permission_matrix` collapse to one key in risk.
+
+Direction (no detector change): first a read-only `GROUP BY run_id, normalized_key` view so Web never double-counts; then align collation on matrix + risk; then the `normalization_key` split in Section 4.
+
+### F.4 Prune discipline and child order
+
+Principles: no backfill of broken sessions, prefer fresh reruns, and **export → preview → verify → delete** (see `AGENTS.md`, "Destructive DB cleanup").
+
+- **Export first:** `PYTHONPATH=. python scripts/db/audit_static_session.py --session …`, or a `mysqldump` of the affected tables, with row-count JSON attached to the ticket.
+- **Selective deletes** inside a mixed session are riskier than leaving completed rows and rerunning the failed packages in a new session.
+- **Mechanics:** delete from `static_analysis_runs` scoped by `session_stamp` + `scope_label` and rely on `ON DELETE CASCADE` where `canonical/schema.py` defines it (findings, matrix, risk vnext, session run links, fileproviders).
+- **Do not cascade — handle explicitly:** `risk_scores` (keyed by package + session + scope, no FK); `static_string_summary` / samples / sample sets; `static_session_rollups`; `permission_audit_snapshots` / `permission_audit_apps` (nullable `static_run_id`, no FK — decide SET NULL vs delete); `masvs_control_coverage` (confirm the FK on the deployed schema).
+- **Verify after:** the session is absent or `cleanup_status=pruned`; then `recreate_web_consumer_views.py`, `smoke_web_db.sh` and `pytest tests/database -q`.
+
+### F.5 Collation first targets and risk
+
+`static_session_run_links` (Web views already wrap joins in `CONVERT(... COLLATE utf8mb4_unicode_ci)`) and `masvs_control_coverage` (observed `latin1`) go first, in one batch. Changing collation can silently split or merge `UNIQUE` keys: preview distinct `(session_stamp, package_name)` counts on links and `v_web_app_sessions` row counts for a golden package set, before and after. Roll back from the pre-migration dump.
+
+### F.6 Staged SQL layout (proposal; tree not created)
+
+| Stage | Contents | Destructive? |
+| --- | --- | --- |
+| `01_readonly_audit/` | SELECT packs, `information_schema` exports | No |
+| `02_additive_schema/` | New tables, indexes | No |
+| `03_backfill_sessions/` | Honest `INSERT … SELECT` aggregates | Writes data; no DELETE |
+| `04_views_web/` | `CREATE OR REPLACE VIEW` | No |
+| `05_prune_helpers/` | Parameterized `PREVIEW.sql` / `VERIFY.sql` | No |
+| `06_destructive_prune/` | `DELETE` / `ALTER`; each file starts with a commented PREVIEW and ends with VERIFY | **Yes** — last, with backup |
+
+---
+
 ## Revision log
 
 | Date | Action |
 | --- | --- |
 | 2026-05-09 | Initial target schema V2 proposal. |
 | 2026-05-09 | Appendix A0: production-aligned `static_analysis_sessions` + `static_session_disposition_history` DDL added to `canonical/schema.py`; `reset_static` + `static_schema_audit` catalog updates. |
+| 2026-10-22 | Appendix F: absorbed the non-duplicated parts of `database_schema_cleanup_design.md`, which was removed. |

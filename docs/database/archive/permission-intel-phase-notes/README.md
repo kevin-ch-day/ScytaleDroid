@@ -7,7 +7,6 @@ for provenance, but the active contract is now:
 - `docs/database/permission_intel_schema_drift_erebus_vs_scytaledroid.md`
 - `docs/database/permission_intel_observation_readiness.md`
 - `docs/maintenance/permission_intelligence_pipeline.md`
-- `docs/maintenance/pi_erebus_operational_boundary.md`
 
 Archived here:
 

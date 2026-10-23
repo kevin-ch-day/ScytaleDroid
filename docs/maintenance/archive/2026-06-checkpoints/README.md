@@ -8,7 +8,6 @@ authority.
 Use current docs first:
 
 - `docs/maintenance/database_target_schema_v2.md`
-- `docs/maintenance/database_schema_cleanup_design.md`
 - `docs/maintenance/database_governance_runbook.md`
 - `docs/device_analysis/README.md`
 - runtime schema/view code under `scytaledroid/Database/`

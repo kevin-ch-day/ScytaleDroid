@@ -65,5 +65,5 @@ When **`session_label` ≠ `session_stamp`** on SAR (edge flows, retries, or too
 ## 5. Related documents
 
 - `docs/maintenance/legacy_static_reader_dependency_map.md` — reader inventory; **`metrics.run_id`** warning.
-- `docs/maintenance/session_static_health_hygiene_plan.md` — aligning `session_static_health.py` with this contract (planned).
+- `scripts/db/session_static_health.py` — follows this contract (canonical-first, legacy mirror optional). Its `--session` filters `static_analysis_runs.session_stamp`; canonical sections print first; a missing legacy `findings`/`runs` table prints SKIP/INFO, not an error; exit `0` when the canonical probe succeeds and `1` for DB/import errors, an empty `--session` or a canonical query failure. (Summary of the former `session_static_health_hygiene_plan.md`, merged 2026-10.)
 - `docs/maintenance/archive/next_pass_docs_policy_implementation_plan.md` — archived rollout checklist for the 2026-05-09 policy slice (documentation Wave W1).

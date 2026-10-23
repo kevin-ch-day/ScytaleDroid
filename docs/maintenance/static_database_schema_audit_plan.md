@@ -235,6 +235,7 @@ Primary **`classification`** (always one). **`status_tags`** (optional, data-dep
 | --- | --- | --- | --- |
 | `static_analysis_runs` | `canonical_keep` | StaticAnalysis | — |
 | `static_analysis_findings` | `canonical_keep` | StaticAnalysis | — |
+| `static_finding_evidence_payloads` | `canonical_keep` | StaticAnalysis | — (SHA-256 keyed JSON bodies referenced by `static_analysis_findings.evidence_hash`; inline `evidence` may be NULL when externalized) |
 | `static_permission_matrix` | `canonical_keep` | StaticAnalysis | — |
 | `static_permission_risk_vnext` | `canonical_keep` | StaticAnalysis | — |
 | `static_string_summary` | `canonical_keep` | StaticAnalysis | — |
@@ -253,7 +254,7 @@ Primary **`classification`** (always one). **`status_tags`** (optional, data-dep
 | `permission_audit_snapshots` | `canonical_keep` | Permissions | — |
 | `permission_signal_observations` | `canonical_keep` | Permissions | — |
 | `artifact_registry` | `derived_keep` | Cross-cutting | — |
-| `risk_scores` | `bridge_compat` | Permissions / rollup | reconcile may flag data-level `stale_review` (manual / queries) |
+| `risk_scores` | `bridge_compat` | Permissions / rollup | reconcile may flag data-level `stale_review` (manual / queries); session/package rollup, **not** in `static_schema_gate()` — empty rollups do not mean the gate failed (`bridge_posture.py`: `derived_review`) |
 | `static_findings_summary` | `derived_keep` | StaticAnalysis | — |
 | `static_findings` | `derived_keep` | StaticAnalysis | — |
 | `runs` | `legacy_freeze` | Legacy | `empty_expected` or `stale_review` |
@@ -264,6 +265,8 @@ Primary **`classification`** (always one). **`status_tags`** (optional, data-dep
 | `correlations` | `legacy_freeze` | Legacy | Only if table exists; `empty_expected` or `stale_review`; **no warning when absent** |
 | `v_static_handoff_v1` | `derived_keep` | StaticAnalysis/Dynamic | — |
 | `v_run_identity` | `derived_keep` | StaticAnalysis/Dynamic | — |
+
+*The former `docs/database/static_schema_table_inventory.md` was merged into this catalogue (2026-10). Where it disagreed (it called `risk_scores` canonical and `static_findings*` legacy), the classifications in `scripts/db/static_schema_audit.py` win, as above.* Session scope: canonical child tables join through `static_analysis_runs.id`; do not filter them by `session_label` / `session_stamp` columns they do not have (`session_identity_contract.md`).
 
 **Schema gates vs catalogue:** `static_schema_gate()` requires the §1 “core” static tables + `v_static_handoff_v1` only. The string set tables, fileprovider tables, dynload/reflection tables, and `static_correlation_results` are **not** gate-required but are **first-class writers** in repo code — classify in catalogue; validate with targeted tests (`tests/persistence`, `tests/static_analysis`, `tests/database`, UI/menu SQL contract tests where applicable).
 
@@ -295,7 +298,7 @@ PYTHONPATH=. python scripts/db/static_schema_audit.py --json
 
 **Explicit non-goals:** no DDL, no `DROP`, no `ALTER`, no Permission Intel DSN queries in this script (core catalog only; use `check_permission_intel.py` for Intel).
 
-**Legacy five — code consumers:** authoritative per-table map in `docs/maintenance/legacy_static_reader_dependency_map.md` §3; short index + baseline grep in `docs/maintenance/legacy_static_tables_consumer_audit.md`. Web impact: `docs/maintenance/legacy_static_tables_web_deep_dive.md`. **Reduction plan (labels / gating / migration sequencing, still no DDL):** [legacy_static_deprecation_playbook.md — Appendix A](legacy_static_deprecation_playbook.md#legacy-static-table-compatibility-appendix).
+**Legacy five — code consumers:** authoritative per-table map in `docs/maintenance/legacy_static_reader_dependency_map.md` §3 (baseline grep §2, Web impact §9). **Reduction plan (labels / gating / migration sequencing, still no DDL):** [legacy_static_deprecation_playbook.md — Appendix A](legacy_static_deprecation_playbook.md#legacy-static-table-compatibility-appendix).
 
 ---
 

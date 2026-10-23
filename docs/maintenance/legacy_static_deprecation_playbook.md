@@ -1,6 +1,6 @@
 # Legacy static tables — deprecation playbook (better-than-drop)
 
-**Audience:** operators and maintainers after the read-only audits (`static_schema_audit.py`, [legacy_static_reader_dependency_map.md](legacy_static_reader_dependency_map.md), short index [legacy_static_tables_consumer_audit.md](legacy_static_tables_consumer_audit.md), [legacy_static_tables_web_deep_dive.md](legacy_static_tables_web_deep_dive.md)).
+**Audience:** operators and maintainers after the read-only audits (`static_schema_audit.py`, [legacy_static_reader_dependency_map.md](legacy_static_reader_dependency_map.md) including its §9 Web consumers).
 
 **Problem with “prune and remove tables first”:** legacy five still have **Python readers**, **`reset_static`** deletes, **`contracts.SCIENTIFIC_UOW_TABLES`**, populated **historical rows**, and **MASVS / reconcile / risk** paths. Dropping tables before code and data policy catches up **breaks** production workflows and loses evidence.
 
@@ -30,7 +30,7 @@
 - **CLI / menus / audits:** label legacy counts as *legacy registry / compatibility*, not “missing static”.
 
 **Partially applied (Python repo):** `scytaledroid/Database/db_utils/menus/query_runner.py` (active session downstream + digest: split **Canonical persistence** vs **Legacy mirror**; clearer orphan message); `scytaledroid/StaticAnalysis/cli/execution/db_verification.py` (footer keys for legacy tables); `scripts/db/audit_static_session.py` (legacy banner); `scytaledroid/StaticAnalysis/cli/persistence/contracts.py` (UoW legacy-name comment); `tests/static_analysis/test_diagnostic_output_helpers.py` (assert string for renamed canonical findings label).
-- **Web (optional):** rename diagnostic keys (`legacy_runs_total` vs canonical count) — `legacy_static_tables_web_deep_dive.md`.
+- **Web (optional):** rename diagnostic keys (`legacy_runs_total` vs canonical count) — dependency map §9.
 - **Docs:** point operators to canonical tables for “truth” questions.
 
 **Exit:** new operators can answer “where is truth?” without reading Python.
@@ -49,7 +49,7 @@
 
 ## Phase 3 — Retire read paths (ordered, still no `DROP`)
 
-Use **`bridge_posture.py`** and **[legacy_static_reader_dependency_map.md](legacy_static_reader_dependency_map.md) §3** as the primary checklist (the [consumer index](legacy_static_tables_consumer_audit.md) is the short entry page). Suggested **order** (each step = PR-sized, with tests):
+Use **`bridge_posture.py`** and **[legacy_static_reader_dependency_map.md](legacy_static_reader_dependency_map.md) §3** as the primary checklist. Suggested **order** (each step = PR-sized, with tests):
 
 1. **Diagnostics-only** paths that only *display* legacy totals (easy to gate or remove display).
 2. **`query_runner.py` / menu** legacy SQL — move under “Legacy (informational)” or hide behind env (display only).
@@ -115,7 +115,7 @@ Use **`bridge_posture.py`** and **[legacy_static_reader_dependency_map.md](legac
 
 *Former standalone doc: `legacy_static_table_compatibility_reduction_plan.md` (archived content merged here; file removed to reduce duplicate maintenance.)*
 
-**Status:** planning only. **No removals, DDL, migrations, or drops.** Builds on [legacy_static_reader_dependency_map.md](legacy_static_reader_dependency_map.md) §3, [legacy_static_tables_consumer_audit.md](legacy_static_tables_consumer_audit.md) (index), and the read-only schema audit checkpoint.
+**Status:** planning only. **No removals, DDL, migrations, or drops.** Builds on [legacy_static_reader_dependency_map.md](legacy_static_reader_dependency_map.md) §3 and the read-only schema audit checkpoint.
 
 **Goal:** reduce operator confusion (“is this still truth?”) without breaking compatibility readers or reconciliation.
 
@@ -198,7 +198,7 @@ grep -RInE '\b(FROM|JOIN|UPDATE|INSERT INTO|DELETE FROM)\s+`?(runs|findings|metr
 
 **Result (checkpoint grep):** Only **`runs`** appears — `database/db_lib/db_queries.php` subselect **`(SELECT COUNT(*) FROM runs) AS runs`**. No hits on legacy **`findings`**, **`metrics`**, **`buckets`**, **`contributors`** with this pattern. Canonical static tables are referenced heavily in the same file (`static_analysis_runs`, `static_analysis_findings`, …) as expected.
 
-See **`legacy_static_tables_web_deep_dive.md`** for view vs base-table structure (`v_web_app_findings`, `vw_static_finding_surfaces_latest AS findings`, `diag.php` gating).
+See [dependency map §9](legacy_static_reader_dependency_map.md#9-web-repo-consumers-checkpoint) for view vs base-table structure (`v_web_app_findings`, `vw_static_finding_surfaces_latest AS findings`, `diag.php` gating).
 
 **Follow-ups (still no DDL here):** relabel that dashboard/diag field as **legacy registry count** vs **`static_runs`**; re-run after Web changes.
 
@@ -235,8 +235,6 @@ See **`legacy_static_tables_web_deep_dive.md`** for view vs base-table structure
 
 - `legacy_static_reader_dependency_map.md` — **authoritative planning map** for legacy-five **readers** (this repo), false positives, `metrics.run_id` warning, Phase 2 retirement buckets, **§2.1.1** mirror-helper wiring (merged). **§8** records follow-up gaps: indirect `table_counts` over the whole catalog, `health_checks_permission` → `contributors`, `v_run_overview` smoke chain, CSV/matrix drift if it reappears, **`status_actions` vs `schema_gate`** (resolved — §8.5), and **`run_persistence_queries` reconcile bridge** shape (**fixed** — §8.6).
 - `archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md` — **completed** Phase 2A record + verification commands (stub).
-- `legacy_static_tables_consumer_audit.md` — **index**: tables in scope, INSERT grep, legend; points here for per-table readers. Relabel / UX sequencing: see **Appendix A** above.
-- `legacy_static_tables_web_deep_dive.md` — Web contract; single `runs` diagnostic.
 - `static_database_schema_audit_plan.md` — read-only inventory semantics.
 
 This playbook is the **better way**: sequenced, reversible early steps, explicit data and DDL gates at the end.

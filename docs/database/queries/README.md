@@ -53,14 +53,13 @@ standardise on the following workflow when materialising them:
 | [`../view_contract_v_web_static_dynamic_app_summary.md`](../view_contract_v_web_static_dynamic_app_summary.md) | Current Web static/dynamic app summary contract |
 | [`../../maintenance/database_governance_runbook.md`](../../maintenance/database_governance_runbook.md) | Operational DB/view recovery and governance |
 | [`../../maintenance/database_target_schema_v2.md`](../../maintenance/database_target_schema_v2.md) | Target schema and read-model direction |
-| [`../../maintenance/database_schema_cleanup_design.md`](../../maintenance/database_schema_cleanup_design.md) | Phased schema cleanup and view posture |
 | `scytaledroid/Database/db_queries/` | Runtime-owned view/query definitions |
 | `scripts/db/` | Operator audit, posture, semantic, and smoke scripts |
 
 ## Archived Sketches
 
 Early standalone query sketches live under
-[`archive/legacy-web-query-sketches/`](archive/legacy-web-query-sketches/).
+[`archive/legacy_web_query_sketches.md`](archive/legacy_web_query_sketches.md).
 They are useful for historical context and SQL examples, but they are not the
 active contract for new DB/Web work.
 

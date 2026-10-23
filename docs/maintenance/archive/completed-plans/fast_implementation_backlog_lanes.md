@@ -2,6 +2,8 @@
 
 **Purpose:** ship small batches quickly without Lane‑3 risk. Each task row is a PR-sized unit.
 
+**Later merges (2026-10):** `session_static_health_hygiene_plan.md` → `session_identity_contract.md`; `pi_erebus_operational_boundary.md` → `docs/database/permission_intel_contract.md`; `static_schema_table_inventory.md` → `static_database_schema_audit_plan.md`. Paths below are as originally created.
+
 ## Lanes
 
 | Lane | Scope | Gate |
@@ -55,4 +57,4 @@ rg 'INSERT INTO (runs|findings|metrics|buckets|contributors)\b' scytaledroid --g
 - `docs/maintenance/session_identity_contract.md`
 - `docs/maintenance/session_static_health_hygiene_plan.md`
 - `docs/maintenance/evidence_run_manifest_spec.md`
-- `docs/maintenance/pi_erebus_operational_boundary.md`
+- `docs/database/permission_intel_contract.md` (ownership section; formerly `pi_erebus_operational_boundary.md`)

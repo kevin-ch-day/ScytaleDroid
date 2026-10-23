@@ -31,6 +31,9 @@ can reduce sprawl without breaking topic ownership.
   - [workflow_entrypoint_map.md](../maintenance/workflow_entrypoint_map.md)
   - [repo_ownership_map.md](../maintenance/repo_ownership_map.md)
   - [cli_web_db_filesystem_boundary.md](../maintenance/cli_web_db_filesystem_boundary.md) — CLI vs Web vs DB vs filesystem roles (V1 posture)
+  - [scripts_integration_strategy.md](../maintenance/scripts_integration_strategy.md) — lifecycle inventory for `scripts/` outside `scripts/db/`
+  - [db_scripts_inventory.md](../maintenance/db_scripts_inventory.md) — the single `scripts/db/` inventory (class, read/write posture, menu owner, status; unclassified scripts listed)
+  - [agent_session_knowledge.md](../maintenance/agent_session_knowledge.md) — portable agent/session practices (imported by `CLAUDE.md`)
   - active flag guidance is folded into `runbook.md`
 
 Notes:
@@ -69,15 +72,20 @@ Notes:
   - [workflow_entrypoint_map.md](../maintenance/workflow_entrypoint_map.md)
   - [static_analysis_audit_runbook.md](../maintenance/static_analysis_audit_runbook.md)
   - [static_analysis_workflow_audit_v1.md](../maintenance/static_analysis_workflow_audit_v1.md) — pipeline / string / split / persistence audit routing (AUDIT note; ticket driver)
+  - [static_run_artifact_lifecycle.md](../maintenance/static_run_artifact_lifecycle.md) — what static runs write under `data/` and `output/`, from inventory to DB
+  - [contracts/persistence_uow_tables.md](../contracts/persistence_uow_tables.md) — persistence unit-of-work table list (checked by `tests/persistence`)
+  - [static_database_schema_audit_plan.md](../maintenance/static_database_schema_audit_plan.md) — `static_schema_audit.py` semantics and the per-object catalogue (absorbed the static table inventory, 2026-10)
+  - [canonical_masvs_risk_views.md](../maintenance/canonical_masvs_risk_views.md) — canonical MASVS / static risk views and apply order
+  - [static_analysis/string_intelligence_explore.md](../static_analysis/string_intelligence_explore.md) — string-intelligence exploratory mode
+  - [database/permission_analysis_schema.md](../database/permission_analysis_schema.md) — permission analysis tables
 - `maintenance`
   - [legacy_bridge_cleanup_backlog.md](../maintenance/legacy_bridge_cleanup_backlog.md)
   - [legacy_static_deprecation_playbook.md](../maintenance/legacy_static_deprecation_playbook.md) — phased legacy-five retirement; **Appendix A** = relabel/migrate/Web-grep buckets (merged Wave W1)
-  - [legacy_static_reader_dependency_map.md](../maintenance/legacy_static_reader_dependency_map.md) — **file/function-level** map of legacy-five readers; Phase 2 retirement ordering; `metrics.run_id` ambiguity; **§2.1.1** mirror-helper wiring (merged Wave W1); **§8** follow-up (planning; not runtime truth)
-  - [legacy_static_tables_consumer_audit.md](../maintenance/legacy_static_tables_consumer_audit.md) — **index**: legacy five scope, INSERT grep baseline, classification legend; per-table detail → dependency map §3
+  - [legacy_static_reader_dependency_map.md](../maintenance/legacy_static_reader_dependency_map.md) — **file/function-level** map of legacy-five readers; Phase 2 retirement ordering; `metrics.run_id` ambiguity; **§2.1.1** mirror-helper wiring (merged Wave W1); **§8** follow-up; **§9** Web consumers (absorbed the consumer index and Web deep dive, 2026-10; planning, not runtime truth)
   - [session_identity_contract.md](../maintenance/session_identity_contract.md) — `session_stamp` vs `session_label`, `static_run_id` vs legacy `runs.run_id`, canonical join rules, forbidden SQL patterns
-  - [session_static_health_hygiene_plan.md](../maintenance/session_static_health_hygiene_plan.md) — align `session_static_health.py` with canonical-first / legacy-optional (planned; script not changed in slice)
-  - [evidence_run_manifest_spec.md](../maintenance/evidence_run_manifest_spec.md) — design-only run-root evidence manifest (no writer yet)
-  - [pi_erebus_operational_boundary.md](../maintenance/pi_erebus_operational_boundary.md) — PI vs Erebus ownership and pre-`obs_sample` blockers
+  - [evidence_run_manifest_spec.md](../maintenance/evidence_run_manifest_spec.md) — run-root evidence manifest spec; Phase 1 (session) writer implemented
+  - [artifact_registry_cleanup_track.md](../maintenance/artifact_registry_cleanup_track.md) — `artifact_registry` integrity, cleanup buckets and receipt-first prune
+  - [static_detector_accuracy_remediation_20260930.md](../maintenance/static_detector_accuracy_remediation_20260930.md) — 2026-09-30 detector accuracy fixes (future analyses only; frozen rows unchanged)
 - `historical`
   - [archive/next_pass_docs_policy_implementation_plan.md](../maintenance/archive/next_pass_docs_policy_implementation_plan.md) — **completed** 2026-05-09 docs/policy slice checklist (archived; see [archive/README.md](../maintenance/archive/README.md))
   - [archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md](../maintenance/archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md) — completed Phase 2A record + verification commands
@@ -97,6 +105,13 @@ Notes:
   - [contracts/freeze_capture_policy_v1.md](../contracts/freeze_capture_policy_v1.md)
   - [contracts/profile_v3_execution_contract.md](../contracts/profile_v3_execution_contract.md) — Profile v3 structural cohort execution protocol and reproducibility minima.
   - profile v3 minima and frozen-input notes are folded into `dynamic_analysis_contract.md`
+  - [design/runtime_ml_literature_alignment.md](../design/runtime_ml_literature_alignment.md) — runtime ML design choices vs literature (reporting aid)
+- `maintenance`
+  - [maintenance/runtime_ml_refactor_audit.md](../maintenance/runtime_ml_refactor_audit.md) — `DynamicAnalysis/ml` maintainability and refactor order
+  - [maintenance/pilot_preflight.md](../maintenance/pilot_preflight.md) — read-only pilot and pre-runtime V2 packet verifiers (never authorize execution)
+  - [maintenance/scientific_instrument_v2.md](../maintenance/scientific_instrument_v2.md) — bounded offline benign-only acceptance instrument
+  - [design/phase1_benign_lab_backend.md](../design/phase1_benign_lab_backend.md) — Phase 1 benign-only emulator lab
+  - [design/isolated_malware_dynamic_backend.md](../design/isolated_malware_dynamic_backend.md) — isolated backend design; **no malware execution implemented or authorized**
 - `generated-spec`
   - [contracts/export_manifest_contract.md](../contracts/export_manifest_contract.md)
 
@@ -116,10 +131,10 @@ Notes:
   - [database/schema_domain_inventory.md](../database/schema_domain_inventory.md)
   - [database/derived_index.md](../database/derived_index.md)
   - [maintenance/database_cleanup_audit_plan.md](../maintenance/database_cleanup_audit_plan.md) — read-only audit SQL pack; interrupted-session drill queries
-  - [maintenance/database_schema_cleanup_design.md](../maintenance/database_schema_cleanup_design.md) — phased schema cleanup, `static_analysis_sessions`, Web SOT, prune/collation strategy
-  - [maintenance/database_target_schema_v2.md](../maintenance/database_target_schema_v2.md) — **target** domain model, sessions center, run identity v2, permission observations/rollup, v2 Web views, migration phases 0–7
+  - [maintenance/database_target_schema_v2.md](../maintenance/database_target_schema_v2.md) — **target** domain model, sessions center, run identity v2, permission observations/rollup, v2 Web views, migration phases 0–7; **Appendix F** = prune order, collation and staged SQL (absorbed the former cleanup design, 2026-10)
   - [maintenance/apk_lineage_redesign_assessment.md](../maintenance/apk_lineage_redesign_assessment.md) — APK content identity vs harvest observation gap; install-set schema and reset guidance
   - [maintenance/database_static_child_table_join_map.md](../maintenance/database_static_child_table_join_map.md) — canonical vs legacy FK patterns (`run_id` vs `static_run_id`), COALESCE trap, session-scoped SQL audit pack pointers
+  - [database/queries/README.md](../database/queries/README.md) — curated query index (old Web sketches archived in one file)
   - [maintenance/repo_ownership_map.md](../maintenance/repo_ownership_map.md)
 
 Notes:
@@ -129,12 +144,13 @@ Notes:
 ### Permission-intel split, bridge cleanup, and migration history
 
 - `authority`
-  - [database/permission_intel_contract.md](../database/permission_intel_contract.md) — active ScytaleDroid Permission Intel boundary, static writer vocabulary, and pre-observation-write contract
+  - [database/permission_intel_contract.md](../database/permission_intel_contract.md) — active ScytaleDroid Permission Intel boundary, static writer vocabulary, PI vs Erebus ownership and pre-`obs_sample` blockers, and pre-observation-write contract
 - `support`
   - [maintenance/legacy_bridge_cleanup_backlog.md](../maintenance/legacy_bridge_cleanup_backlog.md) — current bridge-debt and trust-stability backlog
   - [database/framework_permissions_catalog.md](../database/framework_permissions_catalog.md) — framework permission catalog feed/parser notes and offline YAML fallback behavior.
   - [database/permission_intel_schema_drift_erebus_vs_scytaledroid.md](../database/permission_intel_schema_drift_erebus_vs_scytaledroid.md) — Erebus vs Scytale PI drift; **§0** Permission Intel vs Erebus **catalog / DSN** mental model
   - [database/permission_intel_observation_readiness.md](../database/permission_intel_observation_readiness.md) — read-only PI queue/static observation readiness bundle
+  - [database/scytaledroid_pi_runtime_grants_plan.md](../database/scytaledroid_pi_runtime_grants_plan.md) — proposed reader/submitter role grants (not applied to production)
 - `historical`
   - [database/permission_split_migration_history.md](../database/permission_split_migration_history.md) — completed split sequence and contemporary checkpoints; not the current roadmap
   - [archive/2026-06-checkpoints/](archive/2026-06-checkpoints/) — historical June 2026 schema/inventory/dynamic checkpoint notes; use active schema/governance docs first.
@@ -198,6 +214,8 @@ Notes:
   - [maintenance/operator_acceptance_matrix.md](../maintenance/operator_acceptance_matrix.md)
 - `generated-spec`
   - [contracts/paper_export_schema_v1.json](../contracts/paper_export_schema_v1.json)
+- `historical`
+  - [research/](../research/) — runtime-deviation study record (claims, validation figures) and its final rerun workflow; one record file plus the workflow since 2026-10
 
 Notes:
 - use this cluster for publication/export formats and acceptance expectations
@@ -227,11 +245,9 @@ Notes:
   - [maintenance/repo_ownership_map.md](../maintenance/repo_ownership_map.md)
   - [maintenance/workflow_entrypoint_map.md](../maintenance/workflow_entrypoint_map.md)
 - `maintenance`
-  - [maintenance/housekeeping.md](../maintenance/housekeeping.md) — workspace/logs cadence; **refactor tier order** (merged Wave W1)
-  - [maintenance/logs_operator_hygiene_plan.md](../maintenance/logs_operator_hygiene_plan.md) — **P1/P2** logs layout vs code, naming collisions, and implemented read-only `logs health` report (not P0)
+  - [maintenance/housekeeping.md](../maintenance/housekeeping.md) — workspace/logs cadence, log evidence roles and read-only `logs health` (absorbed the logs hygiene plan, 2026-10); **refactor tier order** (merged Wave W1)
   - [maintenance/legacy_static_deprecation_playbook.md](../maintenance/legacy_static_deprecation_playbook.md) — phased legacy-five retirement + Appendix A compatibility buckets
   - [maintenance/legacy_static_reader_dependency_map.md](../maintenance/legacy_static_reader_dependency_map.md) — legacy static five: readers, false positives, retirement order, §2.1.1 mirror wiring, §8 edge cases (planning)
-  - [maintenance/legacy_static_tables_consumer_audit.md](../maintenance/legacy_static_tables_consumer_audit.md) — legacy five index (pointers to map + playbook + Web deep dive)
 
 Notes:
 - this cluster is valuable for current routing and cleanup work
@@ -248,7 +264,7 @@ High-value later consolidation targets:
 - static workflow:
   - `static_analysis_contract.md`
   - `persistence.md`
-  - selected `static_analysis/*` and `use_cases/*`
+  - selected `static_analysis/*`
 - DB authority:
   - `database/contract_audit_v1_3.md`
   - `database/ownership_matrix_v1_3.csv`
