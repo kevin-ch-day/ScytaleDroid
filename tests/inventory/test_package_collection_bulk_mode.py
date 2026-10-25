@@ -460,3 +460,7 @@ def test_collect_inventory_bulk_mode_counters_match_enriched_vs_bulk_only_rows(m
     assert completion_events[-1]["bulk_rows_completed"] == 2
     assert completion_events[-1]["path_calls_completed"] == 0
     assert completion_events[-1]["metadata_calls_completed"] is None
+    # Live coverage matches the stats counter: one full-fidelity row, one bulk-only row.
+    assert completion_events[-1]["paths_enriched"] == stats.path_enriched_packages == 1
+    # Only the dumpsys-backed row carries complete identity metadata.
+    assert completion_events[-1]["metadata_enriched"] == 1

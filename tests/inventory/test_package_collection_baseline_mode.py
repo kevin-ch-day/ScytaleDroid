@@ -73,6 +73,66 @@ def test_collect_inventory_baseline_mode_keeps_full_diagnostic_metadata_path(mon
     assert completion_events
     assert completion_events[-1]["path_calls_completed"] == 1
     assert completion_events[-1]["metadata_calls_completed"] == 1
+    assert completion_events[-1]["paths_enriched"] == 1
+    # pm dump here returned no last_update/first_install/user_id, so identity metadata is incomplete.
+    assert completion_events[-1]["metadata_enriched"] == 0
+
+
+def test_collect_inventory_baseline_mode_progress_coverage_moves_during_enrichment(monkeypatch):
+    events: list[dict[str, object]] = []
+
+    patch_inventory_collection_defaults(monkeypatch)
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "list_packages",
+        lambda _serial, _use_bulk, allow_fallbacks=False: (
+            [("com.example.first", "1", None), ("com.example.second", "2", None)],
+            ["com.example.first", "com.example.second"],
+            False,
+            False,
+        ),
+    )
+    monkeypatch.setattr(package_collection.adb_client, "get_package_metadata_bulk", lambda _serial: {})
+    monkeypatch.setattr(package_collection.adb_client, "list_package_bulk_entries", lambda _serial: [])
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_paths",
+        lambda _serial, package_name, allow_fallbacks=False: [f"/data/app/~~x/{package_name}/base.apk"],
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata",
+        lambda _serial, package_name: {
+            "version_name": "1.0",
+            "last_update": "2026-06-14 00:40:13",
+            "first_install": "2026-05-08 16:33:35",
+            "user_id": "10001",
+        },
+    )
+
+    def _progress_cb(processed, total, elapsed_seconds, eta_seconds, split_apks, **kwargs):
+        events.append({"processed": processed, "total": total, **kwargs})
+
+    rows, stats = package_collection.collect_inventory(
+        "SER123",
+        use_bulk=False,
+        allow_fallbacks=False,
+        progress_cb=_progress_cb,
+    )
+
+    assert stats.path_enriched_packages == 2
+    second_active = [
+        event
+        for event in events
+        if event.get("current_package") == "com.example.second" and event.get("active")
+    ]
+    assert second_active
+    # While the second package is still being enriched, the first row already counts.
+    assert second_active[0]["paths_enriched"] == 1
+    assert second_active[0]["metadata_enriched"] == 1
+    completion_events = [event for event in events if event.get("current_stage") == "complete"]
+    assert completion_events[-1]["paths_enriched"] == 2
+    assert completion_events[-1]["metadata_enriched"] == 2
 
 
 def test_collect_inventory_baseline_mode_preloads_bulk_metadata_even_for_single_package(
