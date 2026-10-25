@@ -126,7 +126,7 @@ def test_merge_persistence_metadata_carries_apk_set_id() -> None:
     assert report.metadata["apk_set_id"] == 144
 
 
-def test_persist_cohort_rollup_refreshes_static_session_header(monkeypatch) -> None:
+def test_persist_cohort_rollup_refreshes_static_session_header(monkeypatch, capsys) -> None:
     calls: list[tuple[str | None, str | None, str]] = []
     audit_refresh_calls: list[tuple[str | None, bool, bool]] = []
     materialize_calls: list[tuple[str | None, str | None]] = []
@@ -163,8 +163,61 @@ def test_persist_cohort_rollup_refreshes_static_session_header(monkeypatch) -> N
         ),
     )
 
-    results_persist._persist_cohort_rollup("sess-1", "All harvested apps")
+    rollups = results_persist._persist_cohort_rollup("sess-1", "All harvested apps")
 
     assert materialize_calls == [("sess-1", "All harvested apps")]
     assert calls == [("sess-1", "All harvested apps", "post_cohort_rollup")]
     assert audit_refresh_calls == [("sess-1", True, False)]
+    # The rollup is returned for the caller to render; it is no longer printed here.
+    assert rollups is not None
+    assert (rollups.total_run_count, rollups.completed_run_count) == (4, 4)
+    assert "Session history (DB rollup)" not in capsys.readouterr().out
+
+
+def test_persist_cohort_rollup_returns_none_when_nothing_written(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        results_persist,
+        "fetch_static_session_run_rollups",
+        lambda stamp, scope: StaticSessionRunRollups(
+            total_run_count=1,
+            completed_run_count=1,
+            failed_run_count=0,
+            running_run_count=0,
+            interrupted_run_count=0,
+            persist_error_run_count=0,
+            missing_artifacts_run_count=0,
+            first_created_at=None,
+            last_ended_at=None,
+        ),
+    )
+    monkeypatch.setattr(
+        results_persist,
+        "materialize_static_session_rollup",
+        lambda *, session_stamp, scope_label: False,
+    )
+
+    assert results_persist._persist_cohort_rollup("sess-1", "All harvested apps") is None
+    assert results_persist._persist_cohort_rollup(None, "All harvested apps") is None
+    assert capsys.readouterr().out == ""
+
+
+def test_print_session_rollup_prints_once_and_skips_none(capsys) -> None:
+    rollups = StaticSessionRunRollups(
+        total_run_count=185,
+        completed_run_count=184,
+        failed_run_count=1,
+        running_run_count=0,
+        interrupted_run_count=0,
+        persist_error_run_count=0,
+        missing_artifacts_run_count=0,
+        first_created_at=None,
+        last_ended_at=None,
+    )
+
+    results_persist.print_session_rollup(None)
+    assert capsys.readouterr().out == ""
+
+    results_persist.print_session_rollup(rollups)
+    out = capsys.readouterr().out
+    assert out.count("Session history (DB rollup)") == 1
+    assert "session=185 | COMPLETED=184 | FAILED=1 | still_STARTED_or_RUNNING=0" in out

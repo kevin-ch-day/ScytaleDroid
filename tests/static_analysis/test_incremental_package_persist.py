@@ -113,6 +113,92 @@ def test_persist_analyzed_package_marks_committed_and_rollup_failure_is_nonfatal
     assert app.canonical_persist_committed_at_monotonic is not None
 
 
+def _rollups(running: int):
+    from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
+        StaticSessionRunRollups,
+    )
+
+    return StaticSessionRunRollups(
+        total_run_count=3,
+        completed_run_count=3 - running,
+        failed_run_count=0,
+        running_run_count=running,
+        interrupted_run_count=0,
+        persist_error_run_count=0,
+        missing_artifacts_run_count=0,
+        first_created_at=None,
+        last_ended_at=None,
+    )
+
+
+def _durable_persist_env(monkeypatch, *, rollups) -> tuple[AppRunResult, RunParameters]:
+    app = AppRunResult("com.example.app", "Uncategorized")
+    app.static_run_id = 44
+    report = SimpleNamespace(metadata={}, manifest=SimpleNamespace(package_name="com.example.app"))
+    monkeypatch.setattr(app, "base_report", lambda: report)
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist.render_app_result",
+        lambda *_a, **_k: ([], {"baseline": {}}, Counter()),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist.persist_run_summary",
+        lambda *_a, **_k: _DummyOutcome(),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist.apply_persistence_outcome",
+        lambda **_k: (0, 0),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist.merge_persistence_metadata",
+        lambda **_k: None,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist._persist_cohort_rollup",
+        lambda *_a, **_k: rollups,
+    )
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        session_stamp="sess-inc-1",
+        dry_run=False,
+        persistence_ready=True,
+    )
+    return app, params
+
+
+def test_persist_analyzed_package_feeds_rollup_sink_without_printing(monkeypatch, capsys) -> None:
+    app, params = _durable_persist_env(monkeypatch, rollups=_rollups(running=0))
+    seen: list[object] = []
+
+    persist_analyzed_package(app_result=app, params=params, rollup_sink=seen.append)
+
+    assert app.canonical_persist_committed is True
+    assert [r.total_run_count for r in seen] == [3]
+    # Routine per-package rollups are rendered on the checkpoint card, not printed here.
+    assert "Session history (DB rollup)" not in capsys.readouterr().out
+
+
+def test_persist_analyzed_package_prints_rollup_when_runs_still_open(monkeypatch, capsys) -> None:
+    app, params = _durable_persist_env(monkeypatch, rollups=_rollups(running=2))
+
+    persist_analyzed_package(app_result=app, params=params)
+
+    out = capsys.readouterr().out
+    assert out.count("Session history (DB rollup)") == 1
+    assert "still_STARTED_or_RUNNING=2" in out
+
+
+def test_persist_analyzed_package_sink_failure_is_nonfatal(monkeypatch) -> None:
+    app, params = _durable_persist_env(monkeypatch, rollups=_rollups(running=0))
+
+    def _boom(_rollups) -> None:
+        raise RuntimeError("sink boom")
+
+    assert persist_analyzed_package(app_result=app, params=params, rollup_sink=_boom) is not None
+    assert app.canonical_persist_committed is True
+
+
 def test_scan_flow_persists_package_one_before_package_two_starts(monkeypatch, tmp_path: Path) -> None:
     order: list[str] = []
 

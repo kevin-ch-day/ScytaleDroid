@@ -433,3 +433,38 @@ def test_format_static_run_final_summary_block_omits_digest_without_agg_checks()
         dry_run=False,
     )
     assert "Session pipeline totals" not in block
+
+
+def _checkpoint_card(**overrides: object) -> str:
+    kwargs: dict[str, object] = dict(
+        apps_completed=10,
+        total_apps=185,
+        artifacts_done=36,
+        total_artifacts=678,
+        current_app_label="Example",
+        current_package_name="com.example.app",
+        agg_checks=Counter({"ok": 1, "warn": 0, "fail": 0, "policy_fail": 0, "finding_fail": 0, "error": 0}),
+        eta_text="1h 30m",
+        archive_reports_written=36,
+        elapsed_text="5m 00s",
+    )
+    kwargs.update(overrides)
+    return format_scan_progress_checkpoint_card(**kwargs)  # type: ignore[arg-type]
+
+
+def test_checkpoint_card_renders_session_rollup_block() -> None:
+    card = _checkpoint_card(
+        session_rollup={"total": 10, "completed": 9, "failed": 1, "running": 0},
+    )
+    lines = card.split("\n")
+    i = lines.index("Session history (DB rollup)")
+    assert lines[i - 1] == ""
+    assert lines[i + 1] == (
+        "  static_analysis_runs rows 10 · COMPLETED 9 · FAILED 1 · still STARTED/RUNNING 0"
+    )
+    assert "Progress" in lines[: i]
+
+
+def test_checkpoint_card_omits_session_rollup_block_without_counts() -> None:
+    assert "Session history" not in _checkpoint_card()
+    assert "Session history" not in _checkpoint_card(session_rollup={})
