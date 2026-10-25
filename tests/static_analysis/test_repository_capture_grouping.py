@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.core.repository import (
     RepositoryArtifact,
@@ -466,6 +467,7 @@ def test_receipt_backed_cold_blob_fails_clearly_when_mercury_unmounted(
     monkeypatch.setattr(artifact_store, "EXTERNAL_APK_STORE_MOUNT_ROOTS", (external_mount,))
     monkeypatch.setattr(artifact_store.os.path, "ismount", lambda _path: False)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
 
     with pytest.raises(artifact_store.ColdApkBlobUnavailable, match="Mercury drive is not mounted"):
         group_artifacts(receipt_root)

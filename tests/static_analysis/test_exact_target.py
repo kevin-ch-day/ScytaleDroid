@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows import exact_target, headless_run
@@ -128,6 +129,7 @@ def test_exact_target_canonical_cold_blob_fails_clearly_when_mercury_unmounted(
     canonical_link.parent.mkdir(parents=True, exist_ok=True)
     canonical_link.symlink_to(cold_apk)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
     monkeypatch.setattr(artifact_store, "EXTERNAL_APK_STORE_MOUNT_ROOTS", (external_mount,))
     monkeypatch.setattr(artifact_store.os.path, "ismount", lambda _path: False)
 
