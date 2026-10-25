@@ -83,6 +83,7 @@ from .results_persist import (
     _build_ingest_payload,
     _persist_cohort_rollup,
     persist_outcome_is_durable,
+    print_session_rollup,
 )
 from .results_persistence import (
     apply_persistence_outcome,
@@ -1287,7 +1288,8 @@ def _render_run_results_impl(
                         )
                     )
         if outcome.results:
-            _persist_cohort_rollup(session_stamp, params.scope_label)
+            # End of session: always print the rollup once.
+            print_session_rollup(_persist_cohort_rollup(session_stamp, params.scope_label))
 
     if defer_post_run_menu:
         outcome.deferred_diagnostics = {

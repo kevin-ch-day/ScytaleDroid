@@ -30,6 +30,8 @@ class ProgressCallback(Protocol):
         bulk_rows_completed: int | None = None,
         path_calls_completed: int | None = None,
         metadata_calls_completed: int | None = None,
+        paths_enriched: int | None = None,
+        metadata_enriched: int | None = None,
         active: bool = False,
     ) -> None:
         ...
@@ -242,6 +244,11 @@ def collect_inventory(
     profile_calls_metadata = 0
     profile_bulk_rows = 0
     profile_pkg_timings: list[dict[str, object]] = []
+    # Enrichment coverage for live progress: rows that ended with full path fidelity and
+    # rows whose metadata carries the identity fields. The ``profile_calls_*`` counters
+    # above count pm path / pm dump fallback calls and are not a coverage measure.
+    paths_enriched = 0
+    metadata_enriched = 0
 
     for index, package_name in enumerate(package_names, start=1):
         t0 = time.time()
@@ -262,6 +269,8 @@ def collect_inventory(
                     bulk_rows_completed=profile_bulk_rows,
                     path_calls_completed=profile_calls_paths,
                     metadata_calls_completed=profile_calls_metadata,
+                    paths_enriched=paths_enriched,
+                    metadata_enriched=metadata_enriched,
                     active=True,
                 )
                 bulk_entry = bulk_entry_map.get(package_key)
@@ -296,6 +305,8 @@ def collect_inventory(
                             bulk_rows_completed=profile_bulk_rows,
                             path_calls_completed=profile_calls_paths,
                             metadata_calls_completed=profile_calls_metadata,
+                            paths_enriched=paths_enriched,
+                            metadata_enriched=metadata_enriched,
                             active=True,
                         )
                         paths = adb_client.get_package_paths(
@@ -345,6 +356,8 @@ def collect_inventory(
                         bulk_rows_completed=None,
                         path_calls_completed=profile_calls_paths,
                         metadata_calls_completed=profile_calls_metadata,
+                        paths_enriched=paths_enriched,
+                        metadata_enriched=metadata_enriched,
                         active=True,
                     )
                     paths = adb_client.get_package_paths(
@@ -371,6 +384,8 @@ def collect_inventory(
                         bulk_rows_completed=None,
                         path_calls_completed=profile_calls_paths,
                         metadata_calls_completed=profile_calls_metadata,
+                        paths_enriched=paths_enriched,
+                        metadata_enriched=metadata_enriched,
                         active=True,
                     )
                     metadata = bulk_metadata
@@ -387,6 +402,10 @@ def collect_inventory(
         if not bulk_used and t_meta > 0.0:
             profile_calls_metadata += 1
         entry = normalizer.compose_inventory_entry(package_name, paths, metadata, canonical_entry)
+        if _has_full_path_fidelity(entry):
+            paths_enriched += 1
+        if _bulk_metadata_is_complete(metadata):
+            metadata_enriched += 1
         canonical_name = str(entry.get("package_name") or "").strip().lower()
         authoritative_version_code = version_by_package.get(canonical_name)
         if authoritative_version_code:
@@ -422,6 +441,8 @@ def collect_inventory(
                 bulk_rows_completed=profile_bulk_rows if bulk_used else None,
                 path_calls_completed=profile_calls_paths,
                 metadata_calls_completed=profile_calls_metadata if not bulk_used else None,
+                paths_enriched=paths_enriched,
+                metadata_enriched=metadata_enriched,
             )
         if profile_enabled:
             try:
@@ -517,6 +538,8 @@ def _emit_progress(
     bulk_rows_completed: int | None = None,
     path_calls_completed: int | None = None,
     metadata_calls_completed: int | None = None,
+    paths_enriched: int | None = None,
+    metadata_enriched: int | None = None,
     active: bool = False,
 ) -> None:
     if not callback:
@@ -533,6 +556,8 @@ def _emit_progress(
             bulk_rows_completed=bulk_rows_completed,
             path_calls_completed=path_calls_completed,
             metadata_calls_completed=metadata_calls_completed,
+            paths_enriched=paths_enriched,
+            metadata_enriched=metadata_enriched,
             active=active,
         )
     except Exception as exc:  # pragma: no cover - defensive logging

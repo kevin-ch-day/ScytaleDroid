@@ -576,7 +576,10 @@ def launch_scan_flow_resolved(
                 },
             )
         if outcome.results and not summary_render_failed and not outcome.aborted:
-            _dispatch._persist_cohort_rollup(params.session_stamp, params.scope_label)
+            # End of session: always print the rollup once.
+            _dispatch.print_session_rollup(
+                _dispatch._persist_cohort_rollup(params.session_stamp, params.scope_label)
+            )
 
         if (
             run_persistence_enabled
