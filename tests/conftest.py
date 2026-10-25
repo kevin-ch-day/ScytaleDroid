@@ -63,6 +63,36 @@ def isolate_test_logs(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None
         monkeypatch.undo()
 
 
+_GUARDED_DATA_DIRS = (
+    ROOT / "data" / "audit",
+    ROOT / "data" / "sessions",
+    ROOT / "data" / "state" / "schema_migrations",
+)
+
+
+def _guarded_data_files() -> set[pathlib.Path]:
+    return {path for root in _GUARDED_DATA_DIRS if root.is_dir() for path in root.rglob("*") if path.is_file()}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def guard_repo_data_writes() -> Iterator[None]:
+    """Fail the run if tests wrote audit snapshots or migration receipts into the checkout.
+
+    Such files look like real operator evidence; tests must redirect them to tmp_path.
+    """
+
+    before = _guarded_data_files()
+    yield
+    created = sorted(_guarded_data_files() - before)
+    if created:
+        listing = "\n".join(f"  {path.relative_to(ROOT)}" for path in created[:20])
+        pytest.fail(
+            f"tests wrote {len(created)} file(s) into the repository data/ tree "
+            f"(redirect them to tmp_path):\n{listing}",
+            pytrace=False,
+        )
+
+
 @pytest.fixture(autouse=True)
 def isolate_integration_db(request: pytest.FixtureRequest) -> Iterator[None]:
     """Point integration tests at the dedicated test schema and truncate it."""

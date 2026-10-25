@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from scytaledroid.Database.db_utils import dynamic_service_context as catalog
 from scytaledroid.DynamicAnalysis import service_context
 
@@ -109,7 +111,10 @@ def test_apply_dynamic_service_context_migration_records_schema_and_seeds(monkey
     ]
 
 
-def test_apply_dynamic_service_context_migration_reseeds_when_already_applied() -> None:
+def test_apply_dynamic_service_context_migration_reseeds_when_already_applied(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(catalog, "_REPO_ROOT", tmp_path)
     seeded_services: list[tuple[object, ...]] = []
     seeded_maps: list[tuple[object, ...]] = []
 
@@ -137,6 +142,7 @@ def test_apply_dynamic_service_context_migration_reseeds_when_already_applied() 
     payload = catalog.apply_dynamic_service_context_migration(fake_run_sql)
 
     assert payload["already_applied"] is True
+    assert Path(payload["receipt_files"]["json"]).is_relative_to(tmp_path)
     assert payload["services_seeded"] == len(service_context.default_service_catalog_seed_rows())
     assert payload["domain_maps_seeded"] == len(
         service_context.default_service_domain_map_seed_rows()
