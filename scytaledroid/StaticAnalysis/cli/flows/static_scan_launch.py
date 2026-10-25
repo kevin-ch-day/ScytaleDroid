@@ -59,7 +59,8 @@ def _format_open_run_blocker(inspection) -> str:
     return (
         "Persistent static execution blocked: unresolved STARTED static runs exist "
         f"(count={inspection.count}; run_ids={run_ids}; sessions={sessions}; oldest={oldest}). "
-        "Explicit reconciliation is required before another persistent static scan."
+        "Explicit reconciliation is required before another persistent static scan. "
+        f"{inspection.reconcile_hint}"
     )
 
 

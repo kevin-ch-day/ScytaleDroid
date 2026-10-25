@@ -71,6 +71,17 @@ class OpenStaticRunsInspection:
         starts = [run.started_at_utc for run in self.runs if run.started_at_utc]
         return max(starts) if starts else None
 
+    @property
+    def reconcile_hint(self) -> str:
+        """Operator next step for the blocker message (a read-only dry run)."""
+
+        run_id = self.run_ids[0] if len(self.run_ids) == 1 else "<run_id>"
+        return (
+            "Next step (read-only): PYTHONPATH=. python scripts/db/reconcile_stale_static_run.py "
+            f"--run-id {run_id} — it reports whether the run is safe to close and the "
+            "exact values --apply requires."
+        )
+
 
 def _open_static_run_value(row: object, index: int, key: str) -> object:
     if isinstance(row, dict):

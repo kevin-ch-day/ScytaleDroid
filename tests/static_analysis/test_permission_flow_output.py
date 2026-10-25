@@ -16,6 +16,12 @@ from scytaledroid.StaticAnalysis.modules.permissions.permission_manifest_extract
 from scytaledroid.Utils.ops.operation_result import OperationResult
 
 
+@pytest.fixture(autouse=True)
+def _permission_audit_files_in_tmp(tmp_path, monkeypatch):
+    # PermissionAuditAccumulator writes snapshots under the relative data/audit/.
+    monkeypatch.chdir(tmp_path)
+
+
 @dataclass
 class _FakeManifest:
     package_name: str = "com.example.app"
