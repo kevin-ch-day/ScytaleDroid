@@ -196,7 +196,7 @@ def execute_scan(
             raise RuntimeError(
                 "Persistent static execution blocked: unresolved STARTED static runs exist "
                 f"(count={inspection.count}; sessions={sessions}; oldest={oldest}). "
-                "Explicit reconciliation is required."
+                f"Explicit reconciliation is required. {inspection.reconcile_hint}"
             )
 
     started_at = datetime.now(UTC)
