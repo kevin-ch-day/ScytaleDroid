@@ -19,7 +19,7 @@ from ..execution.db_verification import _render_persistence_footer
 from ..execution.heartbeat_state import set_phase as _hb_set_phase
 from ..execution.heartbeat_state import set_run as _hb_set_run
 from ..execution.results import _emit_static_persistence_event, prompt_deferred_post_run_diagnostics
-from ..execution.results_persist import _persist_cohort_rollup
+from ..execution.results_persist import _persist_cohort_rollup, print_session_rollup
 from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
 from ..persistence.run_summary import inspect_open_static_runs
 from . import persistence_runtime
@@ -69,6 +69,7 @@ __all__ = [
     "logging_engine",
     "log_events",
     "persistence_runtime",
+    "print_session_rollup",
     "prompt_deferred_post_run_diagnostics",
     "run_post_summary_postprocessing",
     "signal",

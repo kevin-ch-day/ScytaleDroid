@@ -270,8 +270,14 @@ def format_scan_progress_checkpoint_card(
     split_heavy_note: str | None = None,
     verbose_metrics: bool = False,
     eta_preliminary: bool = False,
+    session_rollup: Mapping[str, int] | None = None,
 ) -> str:
-    """Multiline progress checkpoint for periodic / stride updates (compact all-apps runs)."""
+    """Multiline progress checkpoint for periodic / stride updates (compact all-apps runs).
+
+    ``session_rollup`` carries the latest ``static_analysis_runs`` counts for this session
+    (``total`` / ``completed`` / ``failed`` / ``running``) so the DB rollup is shown once per
+    checkpoint instead of after every package.
+    """
 
     def _kv_top(label: str, value: str) -> str:
         return f"{label:<{_KV_W_TOP}}: {value}"
@@ -306,6 +312,19 @@ def format_scan_progress_checkpoint_card(
     if not collapse_pkg_line:
         lines.append(_kv_top("Package id", id_line))
     lines.extend(["", "Progress", progress_line_1, progress_line_2])
+    if session_rollup:
+        lines.extend(
+            [
+                "",
+                "Session history (DB rollup)",
+                (
+                    f"  static_analysis_runs rows {int(session_rollup.get('total', 0) or 0)} · "
+                    f"COMPLETED {int(session_rollup.get('completed', 0) or 0)} · "
+                    f"FAILED {int(session_rollup.get('failed', 0) or 0)} · "
+                    f"still STARTED/RUNNING {int(session_rollup.get('running', 0) or 0)}"
+                ),
+            ]
+        )
     lines.append("")
     _append_pipeline_events_table(
         lines,

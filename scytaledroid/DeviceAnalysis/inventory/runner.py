@@ -78,6 +78,8 @@ def _make_progress_adapter(progress_cb: ProgressCallback | None):
         bulk_rows_completed: int | None = None,
         path_calls_completed: int | None = None,
         metadata_calls_completed: int | None = None,
+        paths_enriched: int | None = None,
+        metadata_enriched: int | None = None,
         active: bool = False,
     ) -> None:
         if progress_cb:
@@ -95,6 +97,8 @@ def _make_progress_adapter(progress_cb: ProgressCallback | None):
                     "bulk_rows_completed": bulk_rows_completed,
                     "path_calls_completed": path_calls_completed,
                     "metadata_calls_completed": metadata_calls_completed,
+                    "paths_enriched": paths_enriched,
+                    "metadata_enriched": metadata_enriched,
                     "active": active,
                 }
             )

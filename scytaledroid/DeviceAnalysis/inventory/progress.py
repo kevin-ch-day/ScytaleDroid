@@ -146,8 +146,8 @@ def _format_progress_lines(
     current_package: str | None = None,
     current_stage: str | None = None,
     bulk_rows_completed: int | None = None,
-    path_calls_completed: int | None = None,
-    metadata_calls_completed: int | None = None,
+    paths_enriched: int | None = None,
+    metadata_enriched: int | None = None,
     active: bool = False,
 ) -> tuple[str, str, str | None]:
     percentage = (processed / total) * 100 if total else 0.0
@@ -197,10 +197,12 @@ def _format_progress_lines(
     if total > 0:
         if bulk_rows_completed is not None:
             progress_parts.append(f"bulk rows {bulk_rows_completed}/{total}")
-        if path_calls_completed is not None:
-            progress_parts.append(f"paths {path_calls_completed}/{total}")
-        if metadata_calls_completed is not None:
-            progress_parts.append(f"metadata {metadata_calls_completed}/{total}")
+        # Coverage so far: rows with full path fidelity / complete identity metadata.
+        # The pm path / pm dump fallback-call counters are profile data, not progress.
+        if paths_enriched is not None:
+            progress_parts.append(f"paths {paths_enriched}/{total}")
+        if metadata_enriched is not None:
+            progress_parts.append(f"metadata {metadata_enriched}/{total}")
     if progress_parts:
         line2 += " · " + " · ".join(progress_parts)
 
@@ -263,8 +265,8 @@ def make_cli_progress_printer(ui_prefs=None):
             current_package = str(event.get("current_package") or "").strip() or None
             current_stage = str(event.get("current_stage") or "").strip() or None
             bulk_rows_completed = event.get("bulk_rows_completed")
-            path_calls_completed = event.get("path_calls_completed")
-            metadata_calls_completed = event.get("metadata_calls_completed")
+            paths_enriched = event.get("paths_enriched")
+            metadata_enriched = event.get("metadata_enriched")
             active = bool(event.get("active", False))
             show_splits = False
             for mark in (25, 50, 75, 100):
@@ -285,8 +287,8 @@ def make_cli_progress_printer(ui_prefs=None):
                 current_package=current_package,
                 current_stage=current_stage,
                 bulk_rows_completed=int(bulk_rows_completed) if bulk_rows_completed is not None else None,
-                path_calls_completed=int(path_calls_completed) if path_calls_completed is not None else None,
-                metadata_calls_completed=int(metadata_calls_completed) if metadata_calls_completed is not None else None,
+                paths_enriched=int(paths_enriched) if paths_enriched is not None else None,
+                metadata_enriched=int(metadata_enriched) if metadata_enriched is not None else None,
                 active=active,
             )
             lines_to_render = [line1, line2]

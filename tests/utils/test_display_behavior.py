@@ -59,7 +59,7 @@ def test_inventory_progress_no_ansi_in_non_tty(capsys) -> None:
     assert "\033[" not in out
 
 
-def test_inventory_progress_shows_active_package_and_call_counts(capsys) -> None:
+def test_inventory_progress_shows_active_package_and_enrichment_coverage(capsys) -> None:
     printer = inventory_progress.make_cli_progress_printer()
     printer({"phase": "start", "phase_label": "Collecting packages"})
     printer(
@@ -71,8 +71,8 @@ def test_inventory_progress_shows_active_package_and_call_counts(capsys) -> None
             "split_processed": 1,
             "current_package": "com.google.android.apps.messaging",
             "current_stage": "pm dump",
-            "path_calls_completed": 6,
-            "metadata_calls_completed": 5,
+            "paths_enriched": 6,
+            "metadata_enriched": 5,
             "active": True,
         }
     )
@@ -81,6 +81,29 @@ def test_inventory_progress_shows_active_package_and_call_counts(capsys) -> None
     assert "metadata 5/10" in out
     assert "Elapsed" in out and "ETA" in out
     assert "Active pm dump: com.google.android.apps.messaging" in out
+
+
+def test_inventory_progress_ignores_fallback_call_counters(capsys) -> None:
+    # pm path / pm dump call counts are profile data; they must not pose as coverage.
+    printer = inventory_progress.make_cli_progress_printer()
+    printer({"phase": "start", "phase_label": "Collecting packages"})
+    printer(
+        {
+            "phase": "progress",
+            "processed": 5,
+            "total": 10,
+            "elapsed_seconds": 72.0,
+            "split_processed": 0,
+            "current_package": "com.example.app",
+            "current_stage": "bulk",
+            "path_calls_completed": 0,
+            "metadata_calls_completed": 0,
+            "active": True,
+        }
+    )
+    out = colors.strip(capsys.readouterr().out)
+    assert "paths" not in out
+    assert "metadata" not in out
 
 
 def test_inventory_progress_bulk_mode_shows_bulk_rows_without_fake_metadata(capsys) -> None:
@@ -96,7 +119,7 @@ def test_inventory_progress_bulk_mode_shows_bulk_rows_without_fake_metadata(caps
             "current_package": "com.example.bulk",
             "current_stage": "pm path",
             "bulk_rows_completed": 5,
-            "path_calls_completed": 2,
+            "paths_enriched": 2,
             "active": True,
         }
     )
