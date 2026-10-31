@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from scytaledroid.Database.db_utils import artifact_registry_session_stamp
 from scytaledroid.Database.db_utils.artifact_registry_session_stamp import (
     backfill_artifact_registry_session_stamp,
 )
@@ -40,7 +41,8 @@ def test_backfill_session_stamp_read_only_reports_planned_updates() -> None:
     assert result.rows_with_session_stamp_after == 8
 
 
-def test_backfill_session_stamp_apply_uses_update_only() -> None:
+def test_backfill_session_stamp_apply_uses_update_only(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(artifact_registry_session_stamp, "_REPO_ROOT", tmp_path)
     queries: list[str] = []
     audit_rows = iter(
         (
@@ -101,3 +103,4 @@ def test_backfill_session_stamp_apply_uses_update_only() -> None:
     assert result.legacy_static_rows_updated == 3
     assert any("alter table artifact_registry" in query.lower() for query in queries)
     assert any("update artifact_registry ar" in query.lower() for query in queries)
+    assert list((tmp_path / "data" / "state" / "schema_migrations").rglob("*.json"))

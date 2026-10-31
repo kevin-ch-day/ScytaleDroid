@@ -196,7 +196,7 @@ def execute_scan(
             raise RuntimeError(
                 "Persistent static execution blocked: unresolved STARTED static runs exist "
                 f"(count={inspection.count}; sessions={sessions}; oldest={oldest}). "
-                "Explicit reconciliation is required."
+                f"Explicit reconciliation is required. {inspection.reconcile_hint}"
             )
 
     started_at = datetime.now(UTC)
@@ -237,6 +237,18 @@ def execute_scan(
     archive_reports_written = 0
     agg_checks: Counter[str] = Counter()
     recent_completions: deque[str] = deque(maxlen=3)
+    # Latest per-package DB rollup; rendered on the stride checkpoint card instead of
+    # printing a "Session history" line after every package.
+    latest_session_rollup: dict[str, int] | None = None
+
+    def _remember_session_rollup(rollups) -> None:
+        nonlocal latest_session_rollup
+        latest_session_rollup = {
+            "total": int(getattr(rollups, "total_run_count", 0) or 0),
+            "completed": int(getattr(rollups, "completed_run_count", 0) or 0),
+            "failed": int(getattr(rollups, "failed_run_count", 0) or 0),
+            "running": int(getattr(rollups, "running_run_count", 0) or 0),
+        }
     cached_static_session_id: int | None = None
     if not params.dry_run and bool(getattr(params, "persistence_ready", True)):
         try:
@@ -722,6 +734,7 @@ def execute_scan(
             persist_outcome = persist_analyzed_package(
                 app_result=app_result,
                 params=params,
+                rollup_sink=_remember_session_rollup,
             )
             if persist_outcome is not None and not persist_outcome_is_durable(
                 persist_outcome,
@@ -847,6 +860,7 @@ def execute_scan(
                     split_heavy_note=split_note,
                     verbose_metrics=bool(getattr(params, "verbose_output", False)),
                     eta_preliminary=eta_prelim_banner,
+                    session_rollup=latest_session_rollup,
                 )
                 print()
                 print(progress_text)

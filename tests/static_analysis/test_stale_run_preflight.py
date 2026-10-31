@@ -97,6 +97,7 @@ def test_open_rows_block_before_persistent_startup_writes(monkeypatch: pytest.Mo
     assert "count=1" in output
     assert "historical-session" in output
     assert "Explicit reconciliation is required" in output
+    assert "scripts/db/reconcile_stale_static_run.py --run-id 41" in output
 
 
 def test_clean_open_run_preflight_reaches_next_lifecycle_step(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

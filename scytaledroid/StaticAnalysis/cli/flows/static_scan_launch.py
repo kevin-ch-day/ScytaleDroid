@@ -59,7 +59,8 @@ def _format_open_run_blocker(inspection) -> str:
     return (
         "Persistent static execution blocked: unresolved STARTED static runs exist "
         f"(count={inspection.count}; run_ids={run_ids}; sessions={sessions}; oldest={oldest}). "
-        "Explicit reconciliation is required before another persistent static scan."
+        "Explicit reconciliation is required before another persistent static scan. "
+        f"{inspection.reconcile_hint}"
     )
 
 
@@ -575,7 +576,10 @@ def launch_scan_flow_resolved(
                 },
             )
         if outcome.results and not summary_render_failed and not outcome.aborted:
-            _dispatch._persist_cohort_rollup(params.session_stamp, params.scope_label)
+            # End of session: always print the rollup once.
+            _dispatch.print_session_rollup(
+                _dispatch._persist_cohort_rollup(params.session_stamp, params.scope_label)
+            )
 
         if (
             run_persistence_enabled

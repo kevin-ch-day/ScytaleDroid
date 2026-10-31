@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from datetime import UTC, datetime
 
 from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
+    StaticSessionRunRollups,
     fetch_static_session_run_rollups,
     materialize_static_session_rollup,
 )
@@ -20,9 +21,20 @@ from ..views.renderers.summary_render import render_app_result
 from .results_persistence import apply_persistence_outcome, merge_persistence_metadata
 
 
-def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -> None:
+def _persist_cohort_rollup(
+    session_stamp: str | None,
+    scope_label: str | None,
+) -> StaticSessionRunRollups | None:
+    """Materialize the session rollup row and return its counts.
+
+    Returns ``None`` when there is no session, the rollup could not be computed, or
+    nothing was written. This never prints: during a cohort scan the stride
+    checkpoint card renders the counts, and the end-of-session callers print them
+    once through :func:`print_session_rollup`.
+    """
+
     if not session_stamp:
-        return
+        return None
     scope_label = scope_label or ""
     try:
         rollups = fetch_static_session_run_rollups(session_stamp, scope_label)
@@ -35,10 +47,10 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
             f"Failed to compute cohort rollup for session={session_stamp}: {exc}",
             category="static_analysis",
         )
-        return
+        return None
 
     if not rollups or not rollup_written:
-        return
+        return None
 
     # Per-run finalization refreshes the session header before the cohort rollup exists.
     # Refresh once more after the rollup upsert so ``static_analysis_sessions.rollup_rows``
@@ -77,19 +89,27 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
             category="static_analysis",
         )
 
-    level = "info"
-    print(
-        status_messages.status(
-            (
-                f"Session history (DB rollup): static_analysis_runs rows matching this session="
-                f"{rollups.total_run_count} | COMPLETED={rollups.completed_run_count} | "
-                f"FAILED={rollups.failed_run_count} | "
-                f"still_STARTED_or_RUNNING={rollups.running_run_count} "
-                "(non-terminal status rows only; usually 0 after the cohort finishes cleanly)"
-            ),
-            level=level,
-        )
+    return rollups
+
+
+def format_session_rollup_line(rollups: StaticSessionRunRollups) -> str:
+    """One-line ``Session history (DB rollup)`` summary of the session's run rows."""
+
+    return (
+        f"Session history (DB rollup): static_analysis_runs rows matching this session="
+        f"{rollups.total_run_count} | COMPLETED={rollups.completed_run_count} | "
+        f"FAILED={rollups.failed_run_count} | "
+        f"still_STARTED_or_RUNNING={rollups.running_run_count} "
+        "(non-terminal status rows only; usually 0 after the cohort finishes cleanly)"
     )
+
+
+def print_session_rollup(rollups: StaticSessionRunRollups | None) -> None:
+    """Print the session rollup line once; a ``None`` rollup prints nothing."""
+
+    if rollups is None:
+        return
+    print(status_messages.status(format_session_rollup_line(rollups), level="info"))
 
 
 def _build_ingest_payload(
@@ -218,11 +238,14 @@ def persist_analyzed_package(
     ended_at_utc: str | None = None,
     abort_reason: str | None = None,
     abort_signal: str | None = None,
+    rollup_sink: Callable[[StaticSessionRunRollups], None] | None = None,
 ):
     """Persist one package's canonical evidence before the next package starts.
 
     Session rollup is derived after commit. A rollup failure must not invalidate
-    a package that already committed COMPLETED.
+    a package that already committed COMPLETED. The rollup counts go to
+    ``rollup_sink`` (the scan loop renders them on its stride checkpoint card) and
+    are printed immediately only when non-terminal run rows remain.
     """
 
     if getattr(app_result, "canonical_persist_committed", False):
@@ -277,8 +300,9 @@ def persist_analyzed_package(
     if persist_outcome_is_durable(outcome_status, getattr(app_result, "static_run_id", None)):
         app_result.canonical_persist_committed = True
         app_result.canonical_persist_committed_at_monotonic = time.monotonic()
+        rollups: StaticSessionRunRollups | None = None
         try:
-            _persist_cohort_rollup(params.session_stamp, params.scope_label)
+            rollups = _persist_cohort_rollup(params.session_stamp, params.scope_label)
         except Exception as exc:
             log.warning(
                 (
@@ -287,12 +311,25 @@ def persist_analyzed_package(
                 ),
                 category="static_analysis",
             )
+        if rollups is not None:
+            if rollup_sink is not None:
+                try:
+                    rollup_sink(rollups)
+                except Exception as exc:
+                    log.warning(
+                        f"Session rollup sink failed for {app_result.package_name}: {exc}",
+                        category="static_analysis",
+                    )
+            if int(getattr(rollups, "running_run_count", 0) or 0) > 0:
+                print_session_rollup(rollups)
     return outcome_status
 
 
 __all__ = [
     "_build_ingest_payload",
     "_persist_cohort_rollup",
+    "format_session_rollup_line",
     "persist_analyzed_package",
     "persist_outcome_is_durable",
+    "print_session_rollup",
 ]

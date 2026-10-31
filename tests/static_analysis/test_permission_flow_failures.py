@@ -3,10 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.execution import permission_flow
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 from scytaledroid.Utils.ops.operation_result import OperationResult
+
+
+@pytest.fixture(autouse=True)
+def _permission_audit_files_in_tmp(tmp_path, monkeypatch):
+    # PermissionAuditAccumulator writes snapshots under the relative data/audit/.
+    monkeypatch.chdir(tmp_path)
 
 
 @dataclass

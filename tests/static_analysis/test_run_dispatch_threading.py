@@ -4,13 +4,16 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.cli.core.models import RunOutcome, RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
 from scytaledroid.StaticAnalysis.cli.persistence.run_writers import OpenStaticRunsInspection
 
 
-def test_execute_run_spec_detailed_skips_sigint_handler_in_worker_thread(monkeypatch) -> None:
+def test_execute_run_spec_detailed_skips_sigint_handler_in_worker_thread(monkeypatch, tmp_path) -> None:
+    # The dispatcher writes data/sessions/<stamp>/execution.json under DATA_DIR.
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
     now = datetime.now(UTC)
     outcome = RunOutcome(
         results=[],
@@ -82,3 +85,4 @@ def test_execute_run_spec_detailed_skips_sigint_handler_in_worker_thread(monkeyp
     assert result.completed is True
     assert result.outcome is outcome
     assert result.params.session_stamp == "thread-safe-session"
+    assert (tmp_path / "data" / "sessions" / "thread-safe-session" / "execution.json").is_file()

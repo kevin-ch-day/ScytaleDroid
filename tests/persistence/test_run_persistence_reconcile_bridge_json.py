@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.cli.flows.run_persistence_audit import (
     _empty_audit_summary,
     refresh_existing_persistence_audit_payload,
@@ -71,6 +72,7 @@ def test_apply_reconcile_summary_maps_distinct_legacy_mirror_package_counts(monk
 
 def test_empty_audit_summary_uses_filesystem_archive_count(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
     archive_dir = tmp_path / "data" / "static_analysis" / "reports" / "archive" / "sess-fs"
     archive_dir.mkdir(parents=True, exist_ok=True)
     (archive_dir / "a.json").write_text("{}", encoding="utf-8")
@@ -99,6 +101,7 @@ def test_empty_audit_summary_uses_filesystem_archive_count(tmp_path, monkeypatch
 
 def test_refresh_existing_persistence_audit_payload_rebuilds_summary(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
     archive_dir = tmp_path / "data" / "static_analysis" / "reports" / "archive" / "sess-refresh"
     archive_dir.mkdir(parents=True, exist_ok=True)
     for name in ("a.json", "b.json", "c.json"):
@@ -174,6 +177,7 @@ def test_refresh_existing_persistence_audit_payload_direct_mode_updates_rollups_
     monkeypatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
     archive_dir = tmp_path / "data" / "static_analysis" / "reports" / "archive" / "sess-direct"
     archive_dir.mkdir(parents=True, exist_ok=True)
     for name in ("a.json", "b.json"):
@@ -248,6 +252,7 @@ def test_refresh_existing_persistence_audit_payload_direct_mode_updates_rollups_
 
 def test_refresh_persistence_audit_artifact_writes_updated_summary(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
     archive_dir = tmp_path / "data" / "static_analysis" / "reports" / "archive" / "sess-write"
     archive_dir.mkdir(parents=True, exist_ok=True)
     (archive_dir / "a.json").write_text("{}", encoding="utf-8")
@@ -309,6 +314,8 @@ def test_refresh_persistence_audit_artifact_for_session_resolves_existing_artifa
     monkeypatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
     audit_dir = tmp_path / "output" / "audit" / "persistence"
     audit_dir.mkdir(parents=True, exist_ok=True)
     artifact = audit_dir / "sess-path_persistence_audit.json"
@@ -353,6 +360,7 @@ def test_refresh_existing_persistence_audit_payload_survives_reconcile_failure(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
     archive_dir = tmp_path / "data" / "static_analysis" / "reports" / "archive" / "sess-offline"
     archive_dir.mkdir(parents=True, exist_ok=True)
     (archive_dir / "a.json").write_text("{}", encoding="utf-8")
