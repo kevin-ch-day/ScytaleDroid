@@ -342,6 +342,22 @@ After freeze, ML outputs must be treated as immutable:
 - No overwrites for included runs.
 - Bug fixes require bumping the ML schema/output version and writing to a new path.
 
+## 8.3 Held-out calibration (opt-in, separate from query mode)
+
+`scytaledroid.DynamicAnalysis.ml.heldout_calibration` is an opt-in path that
+does not change `query_mode_runner.run_ml_query_mode` (which keeps fitting and
+thresholding on the same training windows). It allocates **whole sessions**
+to `fit` / `calibrate` / `test` before windowing (deterministic for a seed,
+per group, baseline sessions only; interactive and unknown sessions are listed
+as excluded), fits three simple comparators on the fit partition (packet-rate
+threshold, byte-rate threshold, robust distance from per-feature median/MAD),
+sets each threshold at a percentile (default 95) of the calibrate partition's
+scores, and states exceedance on held-out test sessions only. Outputs are
+`allocation_manifest.json` and `heldout_calibration.json` (contract
+`heldout_calibration_v1`, `in_sample: false`). An exceedance figure from this
+path is a held-out measurement; a figure from query mode is in-sample and the
+two must not be compared as if they were the same quantity.
+
 ## 9. Redaction Rules (Summaries Only)
 
 Summaries must never print raw secrets. Redact the following:
