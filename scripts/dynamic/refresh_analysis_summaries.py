@@ -37,6 +37,14 @@ if str(_REPO_ROOT) not in sys.path:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Rewrite analysis/summary.json and analysis/summary.md.")
+    parser.add_argument(
+        "--reseal",
+        action="store_true",
+        help=(
+            "With --apply: allow writes into packs sealed under evidence_sealing_v2 and "
+            "re-seal each one with a new provenance record. Without it, sealed packs are refused."
+        ),
+    )
     parser.add_argument("--pcap-report", action="store_true", help="Also regenerate analysis/pcap_report.json in apply mode.")
     parser.add_argument("--pcap-features", action="store_true", help="Also regenerate analysis/pcap_features.json in apply mode.")
     parser.add_argument("--overlap", action="store_true", help="Also regenerate analysis/static_dynamic_overlap.json in apply mode.")
@@ -247,6 +255,24 @@ def _sync_manifest_output_records(run_dir: Path, records: list[dict[str, Any]]) 
     return changed
 
 
+def _sealed_v2(run_dir: Path, payload: dict[str, Any]) -> bool:
+    from scytaledroid.DynamicAnalysis.core.sealing_v2 import MANIFEST_ANCHOR
+
+    integrity = payload.get("evidence_integrity")
+    return (
+        isinstance(integrity, dict) and integrity.get("contract") == "evidence_sealing_v2"
+    ) or (run_dir / MANIFEST_ANCHOR).is_file()
+
+
+def _reseal_pack(run_dir: Path, *, reason: str) -> None:
+    from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
+
+    payload = _read_json(run_dir / "run_manifest.json")
+    manifest = _manifest_from_payload(payload)
+    manifest.reseal_history = list(payload.get("reseal_history") or [])
+    EvidencePackWriter(run_dir).reseal(manifest, reason=reason, tool="refresh_analysis_summaries")
+
+
 def refresh_summaries(
     *,
     root: Path,
@@ -256,6 +282,7 @@ def refresh_summaries(
     refresh_overlap: bool = False,
     run_ids: set[str] | None = None,
     packages: set[str] | None = None,
+    reseal: bool = False,
 ) -> dict[str, Any]:
     completed_run_dirs, in_progress, ghost = _completed_run_dirs(root)
     scanned = 0
@@ -268,6 +295,8 @@ def refresh_summaries(
     overlap_refreshed = 0
     manifest_outputs_synced = 0
     manifest_writes = 0
+    sealed_refused: list[str] = []
+    resealed: list[str] = []
     rows: list[dict[str, Any]] = []
 
     for run_dir in completed_run_dirs:
@@ -308,6 +337,12 @@ def refresh_summaries(
         if row["old_network_capture_present"] != row["new_network_capture_present"]:
             changed_network_capture += 1
 
+        if apply and _sealed_v2(run_dir, payload) and not reseal:
+            # A sealed pack is immutable canonical evidence; --reseal is the
+            # explicit, provenance-recorded exception.
+            row["sealed_refused"] = True
+            sealed_refused.append(run_id)
+            continue
         if apply:
             changed = _rewrite_derived_artifacts(
                 run_dir=run_dir,
@@ -326,6 +361,9 @@ def refresh_summaries(
             )
             manifest_outputs_synced += synced
             manifest_writes += int(synced > 0)
+            if reseal and _sealed_v2(run_dir, payload):
+                _reseal_pack(run_dir, reason="refresh_analysis_summaries --apply --reseal")
+                resealed.append(run_id)
 
     return {
         "dynamic_evidence_root": str(root.resolve()),
@@ -343,6 +381,9 @@ def refresh_summaries(
         "ghost_dirs_skipped": ghost,
         "rows": rows,
         "apply_mode": bool(apply),
+        "reseal_mode": bool(reseal),
+        "sealed_packs_refused": sealed_refused,
+        "sealed_packs_resealed": resealed,
         "refresh_pcap_report": bool(refresh_pcap_report),
         "refresh_pcap_features": bool(refresh_pcap_features),
         "refresh_overlap": bool(refresh_overlap),
@@ -367,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
         refresh_overlap=refresh_overlap,
         run_ids={str(value) for value in (args.run_id or [])} or None,
         packages={str(value) for value in (args.package or [])} or None,
+        reseal=bool(args.reseal),
     )
     if args.stdout_json:
         print(json.dumps(summary, indent=2, sort_keys=True))

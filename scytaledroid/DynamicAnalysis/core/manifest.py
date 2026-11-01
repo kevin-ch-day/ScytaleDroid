@@ -62,6 +62,8 @@ class RunManifest:
     operator: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     evidence_integrity: dict[str, Any] = field(default_factory=dict)
+    # Appended only by an explicit, provenance-recorded reseal; never by producers.
+    reseal_history: list[dict[str, Any]] = field(default_factory=list)
 
     def add_artifacts(self, records: list[ArtifactRecord]) -> None:
         self.artifacts.extend(records)
@@ -142,6 +144,7 @@ def manifest_to_dict(manifest: RunManifest) -> dict[str, Any]:
         "operator": manifest.operator,
         "notes": manifest.notes,
         "evidence_integrity": manifest.evidence_integrity,
+        **({"reseal_history": manifest.reseal_history} if manifest.reseal_history else {}),
     }
 
 
