@@ -9,10 +9,66 @@ from dataclasses import replace
 from pathlib import Path
 
 CONTRACT = "evidence_sealing_v2"
-EXCLUDED = {
+MANIFEST_ANCHOR = "run_manifest.sha256"
+LEGACY_EXCLUDED = {
     "run_manifest.json": "self_reference; anchor manifest checksum externally",
     "notes/.scytaledroid_in_progress": "transient lifecycle marker removed after seal",
 }
+EXCLUDED = {
+    **LEGACY_EXCLUDED,
+    MANIFEST_ANCHOR: "external anchor: SHA-256 of the sealed run_manifest.json bytes",
+}
+LEGACY_MANIFEST_UNHASHED = "LEGACY_MANIFEST_UNHASHED"
+MANIFEST_ANCHORED = "MANIFEST_ANCHORED"
+MANIFEST_REWRITTEN_AFTER_SEAL = "MANIFEST_REWRITTEN_AFTER_SEAL"
+MANIFEST_ANCHOR_MALFORMED = "MANIFEST_ANCHOR_MALFORMED"
+
+
+def manifest_anchor_text(manifest_path: Path) -> str:
+    """`<sha256>  run_manifest.json` for the published manifest bytes."""
+    digest, _size = hash_regular(Path(manifest_path))
+    return f"{digest}  run_manifest.json\n"
+
+
+def write_manifest_anchor(run_dir: Path) -> Path:
+    """Anchor the sealed manifest's bytes beside it; never inside the inventory."""
+    root = Path(run_dir)
+    anchor = root / MANIFEST_ANCHOR
+    text = manifest_anchor_text(root / "run_manifest.json")
+    tmp = root / (".run_manifest.sha256.tmp." + str(os.getpid()))
+    with tmp.open("w", encoding="utf-8") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, anchor)
+    return anchor
+
+
+def classify_manifest_anchor(run_dir: Path) -> dict:
+    """Detect a post-seal manifest rewrite; packs sealed before anchoring are legacy."""
+    root = Path(run_dir)
+    anchor = root / MANIFEST_ANCHOR
+    manifest = root / "run_manifest.json"
+    if not manifest.is_file():
+        return {"classification": "MANIFEST_MISSING", "anchor_present": False}
+    if not anchor.is_file():
+        return {"classification": LEGACY_MANIFEST_UNHASHED, "anchor_present": False}
+    try:
+        recorded = anchor.read_text(encoding="utf-8").split()
+        recorded_digest = recorded[0] if recorded else ""
+        current_digest, _ = hash_regular(manifest)
+    except (OSError, ValueError, IndexError):
+        return {"classification": MANIFEST_ANCHOR_MALFORMED, "anchor_present": True}
+    if len(recorded_digest) != 64:
+        return {"classification": MANIFEST_ANCHOR_MALFORMED, "anchor_present": True}
+    if recorded_digest != current_digest:
+        return {
+            "classification": MANIFEST_REWRITTEN_AFTER_SEAL,
+            "anchor_present": True,
+            "recorded_sha256": recorded_digest,
+            "current_sha256": current_digest,
+        }
+    return {"classification": MANIFEST_ANCHORED, "anchor_present": True, "sha256": current_digest}
 
 
 def hash_regular(path: Path) -> tuple[str, int]:
@@ -45,8 +101,9 @@ def inventory_files(root: Path) -> dict[str, Path]:
                 dirs.remove(name)
         for name in names:
             p = Path(directory) / name
-            if str(p.relative_to(root)) not in EXCLUDED:
-                files[str(p.relative_to(root))] = p
+            rel = str(p.relative_to(root))
+            if rel not in EXCLUDED and not Path(rel).name.startswith(".run_manifest."):
+                files[rel] = p
     return files
 
 
@@ -164,7 +221,8 @@ def verify_inventory(root: Path, integrity: dict) -> dict:
         issues.append("unaccounted_file:" + extra)
     if integrity.get("status") != "COMPLETE":
         issues.append("seal_incomplete")
-    if integrity.get("scope_exclusions") != EXCLUDED:
+    exclusions = integrity.get("scope_exclusions")
+    if exclusions not in (EXCLUDED, LEGACY_EXCLUDED):
         issues.append("scope_exclusions_differ")
     return {
         "valid": not issues,
@@ -177,6 +235,9 @@ def verify_inventory(root: Path, integrity: dict) -> dict:
 def integrity_grade_reasons(root: Path, integrity: dict) -> list[dict]:
     result = verify_inventory(root, integrity)
     reasons = [{"code": "evidence_integrity_v2_failed", "detail": x} for x in result["issues"]]
+    anchor = classify_manifest_anchor(root)
+    if anchor["classification"] in (MANIFEST_REWRITTEN_AFTER_SEAL, MANIFEST_ANCHOR_MALFORMED):
+        reasons.append({"code": "evidence_integrity_v2_failed", "detail": "manifest_anchor:" + anchor["classification"]})
     if not result.get("provenance_complete"):
         reasons.append({"code": "evidence_provenance_v2_incomplete"})
     return reasons

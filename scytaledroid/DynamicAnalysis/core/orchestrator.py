@@ -776,6 +776,7 @@ class DynamicRunOrchestrator:
             report = write_pcap_report(manifest, run_dir, event_logger=event_logger)
             if report:
                 outputs.append(report)
+                outputs.extend(self._security_surface_artifacts(run_dir))
             features = write_pcap_features(manifest, run_dir, event_logger=event_logger)
             if features:
                 outputs.append(features)
@@ -1187,6 +1188,8 @@ class DynamicRunOrchestrator:
                 sha256=None,
                 size_bytes=plan_path.stat().st_size,
                 produced_by="dynamic_orchestrator",
+                origin="host",
+                pull_status="n/a",
             )
         profile_key = None
         if plan_payload and isinstance(plan_payload, dict):
@@ -1499,7 +1502,31 @@ class DynamicRunOrchestrator:
             sha256=None,
             size_bytes=dest_path.stat().st_size,
             produced_by="static_analysis",
+            origin="host",
+            pull_status="n/a",
         )
+
+    @staticmethod
+    def _security_surface_artifacts(run_dir: Path) -> list[ArtifactRecord]:
+        """Register the surface JSON and review markdown that the report writer emits."""
+        records: list[ArtifactRecord] = []
+        for relative, artifact_type in (
+            ("analysis/security_surface.json", "security_surface"),
+            ("analysis/security_review.md", "security_review"),
+        ):
+            path = run_dir / relative
+            if not path.is_file():
+                continue
+            records.append(ArtifactRecord(
+                relative_path=relative,
+                type=artifact_type,
+                sha256=None,
+                size_bytes=path.stat().st_size,
+                produced_by="pcap_report",
+                origin="host",
+                pull_status="n/a",
+            ))
+        return records
 
     def _start_observers(
         self, run_ctx: RunContext
@@ -1611,6 +1638,8 @@ class DynamicRunOrchestrator:
             sha256=None,
             size_bytes=marker_path.stat().st_size,
             produced_by="orchestrator",
+            origin="host",
+            pull_status="n/a",
         )
 
     @staticmethod

@@ -66,6 +66,11 @@ class EvidencePackWriter:
                 raise RuntimeError(
                     f"Refusing to overwrite sealed manifest: {manifest_path}"
                 ) from exc
+            from .sealing_v2 import write_manifest_anchor
+
+            # The anchor lives beside the manifest, outside the inventory, so a
+            # later rewrite of run_manifest.json is detectable by any verifier.
+            write_manifest_anchor(self.run_dir)
         finally:
             if temp_path is not None:
                 try:
@@ -74,6 +79,49 @@ class EvidencePackWriter:
                     # The immutable target, once linked, remains authoritative.
                     # A stale hidden temp file is cleanup debt, not a failed seal.
                     pass
+        return manifest_path
+
+    def reseal(self, manifest: RunManifest, *, reason: str, tool: str) -> Path:
+        """Explicitly re-seal an already sealed pack with a new provenance record.
+
+        Only a reviewed repair may call this. The previous manifest digest, the
+        reason and the tool are recorded in ``notes/reseal_history.jsonl`` (part of
+        the new inventory) and in ``manifest.reseal_history``; the anchor is rewritten.
+        """
+        from datetime import UTC, datetime
+
+        from .sealing_v2 import classify_manifest_anchor, seal_inventory, write_manifest_anchor
+
+        manifest_path = self.run_dir / "run_manifest.json"
+        if not manifest_path.exists():
+            raise RuntimeError("reseal requires an already sealed manifest")
+        previous = classify_manifest_anchor(self.run_dir)
+        previous_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        stamp = datetime.now(UTC).isoformat()
+        record = {
+            "resealed_at": stamp,
+            "reason": str(reason),
+            "tool": str(tool),
+            "previous_manifest_sha256": previous_digest,
+            "previous_anchor_classification": previous.get("classification"),
+            "previous_sealed_at": manifest.sealed_at,
+            "previous_sealed_by": manifest.sealed_by,
+        }
+        history = self.run_dir / "notes" / "reseal_history.jsonl"
+        history.parent.mkdir(parents=True, exist_ok=True)
+        with history.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        manifest.sealed_at = stamp
+        manifest.sealed_by = f"{app_config.APP_NAME} {app_config.APP_VERSION} reseal:{tool}"
+        existing = getattr(manifest, "reseal_history", None)
+        manifest.reseal_history = [*(existing or []), record]
+        manifest.evidence_integrity = seal_inventory(self.run_dir, manifest)
+        payload = manifest_to_dict(manifest)
+        payload["reseal_history"] = manifest.reseal_history
+        atomic_write_text(manifest_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        write_manifest_anchor(self.run_dir)
         return manifest_path
 
     def is_v2_sealed(self) -> bool:

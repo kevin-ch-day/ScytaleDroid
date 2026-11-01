@@ -102,6 +102,35 @@ def verify_dynamic_evidence_packs(
             dataset.get("tier") if isinstance(dataset, dict) else None
         )
 
+        from scytaledroid.DynamicAnalysis.core.sealing_v2 import (
+            LEGACY_MANIFEST_UNHASHED,
+            MANIFEST_ANCHOR_MALFORMED,
+            MANIFEST_REWRITTEN_AFTER_SEAL,
+            classify_manifest_anchor,
+        )
+
+        anchor = classify_manifest_anchor(run_dir)
+        anchor_class = str(anchor.get("classification") or "")
+        integrity = manifest.get("evidence_integrity") if isinstance(manifest, dict) else None
+        v2_sealed = isinstance(integrity, dict) and integrity.get("contract") == "evidence_sealing_v2"
+        if anchor_class == MANIFEST_REWRITTEN_AFTER_SEAL:
+            issues.append(
+                VerifyIssue(
+                    "manifest_rewritten_after_seal",
+                    "run_manifest.json bytes differ from the sealed anchor run_manifest.sha256",
+                )
+            )
+        elif anchor_class == MANIFEST_ANCHOR_MALFORMED:
+            issues.append(VerifyIssue("manifest_anchor_malformed", "run_manifest.sha256 is unreadable"))
+        elif anchor_class == LEGACY_MANIFEST_UNHASHED and v2_sealed:
+            # Sealed before anchoring existed: classified, not failed.
+            issues.append(
+                VerifyIssue(
+                    "legacy_manifest_unhashed",
+                    "sealed before run_manifest.sha256 anchoring; post-seal rewrites undetectable",
+                )
+            )
+
         if bound_manifest_run_id(manifest, run_dir) is None:
             issues.append(
                 VerifyIssue(
