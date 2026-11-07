@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from scytaledroid.StaticAnalysis.detectors.native import NativeHardeningDetector
 from scytaledroid.StaticAnalysis.modules.string_analysis import (
     IndexedString,
@@ -12,9 +14,14 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
     extract_endpoints,
 )
 from scytaledroid.StaticAnalysis.modules.string_analysis.indexing.sources import (
+    _is_probable_protobuf,
     classify_origin_type,
+    collect_file_strings,
 )
-from scytaledroid.StaticAnalysis.modules.string_analysis.indexing.utils import StringFragment
+from scytaledroid.StaticAnalysis.modules.string_analysis.indexing.utils import (
+    StringFragment,
+    looks_textual,
+)
 
 
 def test_classify_origin_type_uses_canonical_labels() -> None:
@@ -39,6 +46,68 @@ def test_string_index_search_accepts_legacy_dex_alias() -> None:
 
     assert len(hits) == 1
     assert hits[0].origin_type == "code"
+
+
+class _BinaryCodeFakeApk:
+    filename = "binary-code.apk"
+    split_name = "base"
+    ascii_literal = "https://api.Example.test/v1?Key=CaseSensitive"
+    wide_literal = "WideCodeLiteral"
+
+    def __init__(self) -> None:
+        header = b"dex\n035\0" + b"\0" * 4096
+        self.files = {
+            "classes.dex": header + self.ascii_literal.encode("ascii") + b"\0short\0",
+            "classes2.dex": header + self.wide_literal.encode("utf-16-le") + b"\0\0",
+            "assets/opaque.bin": header + b"https://unrelated-binary.test/\0",
+            "assets/config.json": b'{"endpoint":"https://text-asset.test/"}',
+        }
+
+    def get_files(self):
+        return tuple(self.files)
+
+    def get_file(self, name):
+        return self.files[name]
+
+    def get_buff(self):
+        return b"synthetic-code-collection-fixture"
+
+
+@pytest.mark.parametrize("mode", ["full", "split_lightweight"])
+def test_binary_code_strings_keep_literal_offsets_and_provenance(mode: str) -> None:
+    apk = _BinaryCodeFakeApk()
+    for name in ("classes.dex", "classes2.dex", "assets/opaque.bin"):
+        assert not looks_textual(apk.files[name])
+        assert not _is_probable_protobuf(apk.files[name])
+
+    entries = collect_file_strings(apk, mode=mode)
+    expected_apk_hash = hashlib.sha256(apk.get_buff()).hexdigest()
+    for origin, literal, encoded, dex_id in (
+        ("classes.dex", apk.ascii_literal, apk.ascii_literal.encode("ascii"), 1),
+        ("classes2.dex", apk.wide_literal, apk.wide_literal.encode("utf-16-le"), 2),
+    ):
+        offset = apk.files[origin].index(encoded)
+        matches = [
+            entry
+            for entry in entries
+            if entry.origin == origin and entry.value == literal and entry.byte_offset == offset
+        ]
+        assert matches, f"missing binary-code literal and original byte offset: {origin}"
+        for entry in matches:
+            assert entry.origin_type == "code"
+            assert entry.source_sha256 == hashlib.sha256(apk.files[origin]).hexdigest()
+            assert entry.apk_sha256 == expected_apk_hash
+            assert entry.split_id == "base" and entry.dex_id == dex_id
+            assert entry.apk_offset_kind == "byte_offset"
+            assert entry.confidence == "low"
+            assert entry.synthetic is False and entry.derived_from is None
+    assert not any(entry.origin == "assets/opaque.bin" for entry in entries)
+    assert not any(entry.value == "short" for entry in entries)
+    assert any(
+        "https://text-asset.test/" in entry.value
+        for entry in entries
+        if entry.origin == "assets/config.json"
+    )
 
 
 def test_extract_endpoints_keeps_multiple_urls_from_same_literal() -> None:
