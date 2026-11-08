@@ -250,3 +250,23 @@ def test_external_apk_mount_roots_default_to_active_mercury_hdd(monkeypatch) -> 
     roots = artifact_store._configured_external_apk_store_mount_roots()  # noqa: SLF001 - config contract
 
     assert roots == (Path("/mnt/MERCURY_DATA_V2"),)
+
+
+@pytest.mark.parametrize('matching_alias', [True, False])
+def test_shared_external_cas_requires_matching_logical_alias(tmp_path, monkeypatch, matching_alias):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, 'DATA_DIR', 'data')
+    volume = tmp_path / 'venus'
+    monkeypatch.setattr(artifact_store, 'EXTERNAL_APK_STORE_MOUNT_ROOTS', (volume,))
+    digest = 'e' * 64
+    target = volume / 'Noctivar/apks/sha256/ee' / (digest + '.apk')
+    target.parent.mkdir(parents=True); target.write_bytes(b'inert')
+    alias = artifact_store.canonical_apk_path(digest)
+    alias.parent.mkdir(parents=True)
+    if matching_alias:
+        alias.symlink_to(target)
+    else:
+        other = tmp_path / 'other.apk'; other.write_bytes(b'other')
+        alias.symlink_to(other)
+    expected = f'data/store/apk/sha256/ee/{digest}.apk' if matching_alias else target.relative_to(tmp_path).as_posix()
+    assert artifact_store.repo_relative_path(target) == expected
