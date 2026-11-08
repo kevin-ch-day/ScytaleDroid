@@ -159,7 +159,7 @@ def _is_probable_protobuf(blob: bytes) -> bool:
 
 
 def _should_scan_binary(origin_type: str, blob: bytes) -> bool:
-    if origin_type == "native":
+    if origin_type in {"native", "code"}:
         return True
     if origin_type == "rn_bundle":
         return True

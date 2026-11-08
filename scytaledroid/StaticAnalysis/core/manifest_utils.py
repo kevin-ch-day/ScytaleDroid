@@ -84,6 +84,9 @@ def load_manifest_root(apk: APK) -> ElementTree.Element:
     except Exception as exc:  # pragma: no cover - defensive, androguard handles parsing
         raise StaticAnalysisError(f"Unable to parse AndroidManifest.xml: {exc}") from exc
 
+    if manifest_xml is None:
+        raise StaticAnalysisError("Decoded AndroidManifest.xml unavailable: parser returned no XML")
+
     if hasattr(manifest_xml, "tag"):
         # Androguard may return an lxml element when that dependency is available.
         try:

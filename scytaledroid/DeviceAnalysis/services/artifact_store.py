@@ -428,7 +428,16 @@ def _canonical_store_logical_repo_path(path: Path) -> str | None:
         return None
     logical_suffix = _canonical_store_suffix(candidate)
     if logical_suffix is None:
-        return None
+        # Shared external stores may use another layout. Only map an already
+        # established local canonical alias, never a same-named unrelated file.
+        match = re.fullmatch(r"([0-9a-f]{64})\.apk", candidate.name)
+        if match is None:
+            return None
+        digest = match.group(1)
+        alias = logical_root / digest[:2] / candidate.name
+        if not alias.is_symlink() or not candidate.is_file() or alias.resolve(strict=False) != candidate:
+            return None
+        logical_suffix = Path("sha256") / digest[:2] / candidate.name
     return (Path(app_config.DATA_DIR) / "store" / "apk" / logical_suffix).as_posix()
 
 
