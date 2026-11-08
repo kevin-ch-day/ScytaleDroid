@@ -260,13 +260,15 @@ def test_shared_external_cas_requires_matching_logical_alias(tmp_path, monkeypat
     monkeypatch.setattr(artifact_store, 'EXTERNAL_APK_STORE_MOUNT_ROOTS', (volume,))
     digest = 'e' * 64
     target = volume / 'Noctivar/apks/sha256/ee' / (digest + '.apk')
-    target.parent.mkdir(parents=True); target.write_bytes(b'inert')
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b'inert')
     alias = artifact_store.canonical_apk_path(digest)
     alias.parent.mkdir(parents=True)
     if matching_alias:
         alias.symlink_to(target)
     else:
-        other = tmp_path / 'other.apk'; other.write_bytes(b'other')
+        other = tmp_path / 'other.apk'
+        other.write_bytes(b'other')
         alias.symlink_to(other)
     expected = f'data/store/apk/sha256/ee/{digest}.apk' if matching_alias else target.relative_to(tmp_path).as_posix()
     assert artifact_store.repo_relative_path(target) == expected
