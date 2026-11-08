@@ -1,5 +1,18 @@
 # Operator Acceptance Matrix
 
+> **Historical workspace checkpoint — April 27, 2026.**
+>
+> The original matrix below is preserved unchanged for historical context. Its
+> "current" wording describes that checkpoint, not current operational readiness.
+> The `0` local evidence packs and `103` runs missing features have not been
+> refreshed here and must not be used as live inventory counts.
+>
+> For current static persistence, use the [persistence contract](../persistence.md)
+> and [canonical run writer](../../scytaledroid/StaticAnalysis/cli/persistence/run_writers.py).
+> The canonical `static_analysis_*` path and related canonical tables own static
+> results; the run writer does not insert a legacy `runs` mirror. The dual-write
+> statement retained below is historical.
+
 Date: 2026-04-27
 
 This matrix is the current operator-facing source of truth for ScytaleDroid
