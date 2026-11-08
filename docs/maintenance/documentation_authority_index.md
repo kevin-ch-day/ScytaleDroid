@@ -211,10 +211,10 @@ Notes:
   - [contracts/export_manifest_contract.md](../contracts/export_manifest_contract.md)
 - `support`
   - [contracts/paper_reason_codes_v1.md](../contracts/paper_reason_codes_v1.md)
-  - [maintenance/operator_acceptance_matrix.md](../maintenance/operator_acceptance_matrix.md)
 - `generated-spec`
   - [contracts/paper_export_schema_v1.json](../contracts/paper_export_schema_v1.json)
 - `historical`
+  - [maintenance/operator_acceptance_matrix.md](../maintenance/operator_acceptance_matrix.md) — April 27, 2026 workspace checkpoint; not current operational readiness or persistence authority
   - [research/](../research/) — runtime-deviation study record (claims, validation figures) and its final rerun workflow; one record file plus the workflow since 2026-10
 
 Notes:
